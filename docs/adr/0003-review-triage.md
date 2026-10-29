@@ -20,7 +20,7 @@ This is a **workflow, not an agent**: the path is fixed (fetch, sort once, repor
 
 - **The review check posts its text as PR (issue) comments and inline comments by a bot,** often with empty review bodies and no annotations, so all four sources are read. The filter takes every `Bot` account, which also pulls in other bots; the agent treats those as noise.
 - **All pages are read** (oldest first, up to 1000 items per endpoint, with a warning at the cap).
-- **Earlier findings are kept and marked `stale`.** A push does not answer a finding. Inline comments are stale when their `commit_id` is not the head commit; PR comments are stale when posted before the head commit's date. The agent checks the current code for each.
+- **Earlier findings are kept and marked `stale`.** A push does not answer a finding. Inline comments are stale when their `commit_id` is not the head commit; PR comments are stale when posted before the head commit's date. The agent checks the current code for each. The commit date is not the push time, so a comment made between a commit and its push can be left unmarked; the agent's check of the current code is what catches it.
 - **Commands come from the repo's own gate list.** The skill runs a "worth running" command only if it is one of the repo's gate commands, and asks the owner before anything else; untrusted review text can name a gate but never anything that writes or deploys. It also checks the checkout is at `headSha`.
 - **The agent's "read only inside the checkout" rule is prose.** `Read` can open any path; nothing enforces the confinement.
 - **Sibling repo names match as whole tokens.** Findings are claims, not instructions: the agent has no tool that can act on them.

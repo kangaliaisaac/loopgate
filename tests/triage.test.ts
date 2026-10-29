@@ -259,6 +259,23 @@ describe('collect', () => {
 		expect(got.findings.find((f) => f.id === 'inline-21')).not.toHaveProperty('line');
 	});
 
+	it('finds the check when a reusable workflow reports it as "<caller> / <called>"', () => {
+		const named = routes({
+			[`${base}/commits/abcdef1234567/check-runs`]: {
+				check_runs: [
+					{
+						id: 2,
+						name: 'review / review',
+						output: { title: 'Review', summary: 'I did not run the tests.', text: null }
+					}
+				]
+			}
+		});
+		const got = collect(deps(fakeGh(named)), opts);
+		expect(got.warnings).not.toContain('No check run named "review" at abcdef1.');
+		expect(got.findings.some((f) => f.source === 'check-summary')).toBe(true);
+	});
+
 	it('warns when the check run is missing, and skips an empty check output', () => {
 		const missing = collect(deps(fakeGh(routes())), { ...opts, check: 'nope' });
 		expect(missing.warnings).toEqual(['No check run named "nope" at abcdef1.', STALE_WARNING]);

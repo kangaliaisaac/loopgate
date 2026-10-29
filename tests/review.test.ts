@@ -75,6 +75,8 @@ describe('classify', () => {
 	});
 });
 
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 interface Fake {
 	dirty?: boolean;
 	notRepo?: boolean;
@@ -111,6 +113,8 @@ function setup(fake: Fake = {}): { deps: PrepareDeps; written: Record<string, st
 				return args[1] === '--show-toplevel'
 					? { code: 0, output: `/w/example-api\n${head}\n` }
 					: { code: 0, output: 'feat/x\n' };
+			case 'hash-object':
+				return { code: 0, output: `${EMPTY_TREE}\n` };
 			case 'status':
 				return { code: 0, output: fake.dirty ? ' M a.rs\n' : '' };
 			case 'remote':
@@ -234,8 +238,10 @@ describe('prepareReview', () => {
 		const result = prepareReview('/w/example-api', setup({ noRemote: true, calls }).deps);
 		if (!result.ok) throw new Error(result.message);
 		expect(result.prepared.warnings).toContain(
-			'origin/main does not exist, so this review covers the whole tree.'
+			'origin/main was not found, so this review covers the whole tree.'
 		);
+		expect(result.prepared.base).toBe(EMPTY_TREE);
+		expect(calls).toContain(`diff --numstat --no-renames ${EMPTY_TREE} HEAD`);
 		expect(calls.some((c) => c.startsWith('merge-base'))).toBe(false);
 		expect(calls).toContain('hash-object -t tree /dev/null');
 		expect(calls).toContain('log --format=%h %s HEAD');

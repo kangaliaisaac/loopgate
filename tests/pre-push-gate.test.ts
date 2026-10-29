@@ -12,9 +12,9 @@ function git(dir: string, ...args: string[]): string {
 }
 
 /** A repo named `demo` (by its origin) with one commit, plus an empty state directory. */
-function fixture(withConfig: boolean) {
+function fixture(withConfig: boolean, dirName = 'demo') {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), 'hook-')));
-	const repo = join(root, 'demo');
+	const repo = join(root, dirName);
 	const state = join(root, 'state');
 	mkdirSync(repo);
 	mkdirSync(state);
@@ -47,25 +47,78 @@ describe('pre-push-gate hook', () => {
 		expect(run('git push --dry-run', repo, state).code).toBe(0);
 	});
 
-	it('catches pushes behind a quoted path with a space, then/do, global options and env', () => {
+	it('catches pushes behind then/do, global options, env, substitutions and continuations', () => {
 		const { repo, state } = fixture(true);
-		const spaced = join(repo, '..', 'with space');
-		mkdirSync(spaced);
 		for (const command of [
-			`git -C "${repo}" push`,
 			'if true; then git push; fi',
 			'for x in 1; do git push; done',
 			'git -c core.pager=cat push origin main',
 			'git --no-pager push',
+			'git --git-dir /x push',
+			'git "push"',
+			'git push>/dev/null',
 			'env X=1 git push',
 			"bash -c 'git push'",
+			'echo "$(git push origin main)"',
+			'out=`git push`',
+			'git -C . \\\n  push origin main',
 			'git commit -m "add --dry-run flag" && git push',
 			'git push && echo -n done',
-			'git push --dry-run && git push'
+			'git push --dry-run && git push',
+			"printf 'main\\n' | xargs -n 1 git push origin",
+			'nice -n 10 git push',
+			'git push -o -n origin main'
 		]) {
 			expect(run(command, repo, state).code, command).toBe(2);
 		}
-		expect(run('git push', spaced, state).code).toBe(2);
+	});
+
+	it('blocks a push whose target cannot be told, rather than guessing', () => {
+		const { repo, state } = fixture(true);
+		for (const command of [
+			'(cd /elsewhere && git push)',
+			'pushd /elsewhere && git push',
+			'GIT_DIR=/elsewhere/.git git push',
+			'git --git-dir=/elsewhere/.git push'
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('cannot be told');
+		}
+	});
+
+	it('does not mistake a mention of pushing for a push', () => {
+		const { repo, state } = fixture(true);
+		for (const command of [
+			'git commit -m "Harden the push hook"',
+			'git log --grep push',
+			'echo "git push" | cat',
+			'git push --dry-run origin main',
+			'git push -n'
+		]) {
+			expect(run(command, repo, state).code, command).toBe(0);
+		}
+	});
+
+	it('finds a repo at a path with a space, quoted either way, from another directory', () => {
+		const { repo, state, head } = fixture(true, 'with space');
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		expect(run(`git -C "${repo}" push`, tmpdir(), state).code).toBe(0);
+		expect(run(`git -C '${repo}' push`, tmpdir(), state).code).toBe(0);
+		expect(run(`cd "${repo}" && git push`, tmpdir(), state).code).toBe(0);
+	});
+
+	it('checks every repo a command pushes, and a cd applies only to what follows it', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const other = join(repo, '..', 'other');
+		mkdirSync(other);
+		expect(run(`git -C ${repo} push && git -C ${repo} push`, tmpdir(), state).code).toBe(0);
+		expect(run(`git -C ${repo} push && git -C ${other} push`, tmpdir(), state).code).toBe(2);
+		expect(run(`git push; cd ${other}; git push`, repo, state).code).toBe(2);
+		expect(run(`cd ${other}; git -C ${repo} push`, tmpdir(), state).code).toBe(0);
 	});
 
 	it('judges a cd-then-push by the repo it moves into, resolved against the session directory', () => {
