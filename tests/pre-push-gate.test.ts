@@ -170,6 +170,80 @@ describe('pre-push-gate hook', () => {
 		}
 	});
 
+	it('reads no quotes in a heredoc body or a comment, and refuses what it cannot balance', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const other = fixture(true, 'other').repo;
+		// The apostrophes and the quoted word would hide the cd if they were read as quotes.
+		for (const command of [
+			`cat > NOTES.md <<'EOF'\nDon't merge yet.\nEOF\ncd ${other} && git push`,
+			`cat <<EOF\nit's "ok"\nEOF\ncd ${other} && git push`,
+			`cat <<-EOF\n\tdon't\n\tEOF\ncd ${other} && git push`,
+			`true # don't\ncd ${other} && git push`
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('the gates have not passed for demo');
+		}
+		// A heredoc that mentions pushing is data, not a push; a here-string is not a heredoc.
+		expect(run(`cat <<'EOF'\ngit push origin main\nEOF\ngit status`, repo, state).code).toBe(0);
+		expect(run(`cat <<< "don't" && git push`, repo, state).code).toBe(0);
+		for (const command of [
+			`echo "don't && git push`,
+			`x=$(echo 'a; git push`,
+			`cat <<EOF\n$(cd ${other}; pwd)\nEOF\ngit push`,
+			`cat <<EOF\nnever closed\ngit push`
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('cannot be told');
+		}
+		expect(run(`echo "don't`, repo, state).code).toBe(0);
+	});
+
+	it('refuses a cd handed to a shell that has option words before -c', () => {
+		const { repo, state } = fixture(true);
+		for (const command of [
+			`bash -e -c 'set -o pipefail; cd ${repo}; git push'`,
+			`bash --login -c 'cd ${repo}; git push'`,
+			`bash -o pipefail -c 'cd ${repo}; git push'`,
+			`sh -x -c "cd ${repo}; git push"`
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('cannot be told');
+		}
+	});
+
+	it('reads -n and -C only as git options, not from a substitution or a quoted value', () => {
+		const { repo, state, head } = fixture(true);
+		const other = fixture(true, 'other').repo;
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		// A real push, so with records in `repo` it is allowed there and refused in `other`.
+		expect(
+			run(`git push origin "$(git branch --show-current | head -n 1)"`, repo, state).code
+		).toBe(0);
+		expect(
+			run(`git push origin "$(git branch --show-current | head -n 1)"`, other, state).code
+		).toBe(2);
+		expect(
+			run(`git push -u origin "$(git -C ${other} branch --show-current)"`, repo, state).code
+		).toBe(0);
+		expect(run(`git -c core.sshCommand="ssh -C x" push`, repo, state).code).toBe(0);
+		expect(run(`git -c core.sshCommand="ssh -C x" -C ${other} push`, repo, state).code).toBe(2);
+	});
+
+	it('blocks a target with no working tree', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const blocked = run(`git -C ${join(repo, '.git')} push`, repo, state);
+		expect(blocked.code).toBe(2);
+		expect(blocked.stderr).toContain('no working tree');
+	});
+
 	it('expands a leading ~ in a cd or -C path', () => {
 		const { repo, state, head } = fixture(true);
 		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
