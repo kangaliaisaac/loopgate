@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"target": "es2023",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"lib": ["es2023"],
+		"types": ["node"],
+		"strict": true,
+		"noEmit": true,
+		"erasableSyntaxOnly": true,
+		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"forceConsistentCasingInFileNames": true,
+		"skipLibCheck": true
+	},
+	"include": ["src", "hooks", "bin", "tests", "*.ts", "*.js"]
+}
