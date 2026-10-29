@@ -1,6 +1,6 @@
 name: Claude review
 
-# Reusable workflow: each repo calls it from a 10-line workflow (see claude-review-caller.yml).
+# Reusable workflow: each repo calls it from a 10-line workflow (see docs/review-caller.example.yml).
 on:
   workflow_call:
     secrets:
