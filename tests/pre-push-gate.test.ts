@@ -69,6 +69,8 @@ describe('pre-push-gate hook', () => {
 			'out=$(git push origin main 2>&1 | tail -n 20)',
 			"bash -c 'git push && echo -n done'",
 			"bash -c 'git push -n; git push'",
+			"bash -c 'git push origin main\necho -n done'",
+			"bash -c 'git push -n\ngit push'",
 			'nice -n 10 git push',
 			'git push -o -n origin main'
 		]) {
@@ -84,6 +86,10 @@ describe('pre-push-gate hook', () => {
 			'GIT_DIR=/elsewhere/.git git push',
 			'git --git-dir=/elsewhere/.git push',
 			'env -C /elsewhere git push',
+			'/usr/bin/env -C /elsewhere git push',
+			'env -u NAME -C /elsewhere git push',
+			'genv --chdir=/elsewhere git push',
+			"bash -c 'git -C /a push && git -C /b push'",
 			'true;pushd /elsewhere;git push',
 			'env --chdir=/elsewhere git push',
 			'x=$(cd /elsewhere && git rev-parse HEAD); git push',
@@ -143,7 +149,11 @@ describe('pre-push-gate hook', () => {
 			'git checkout other && git push -u origin other',
 			'git pull --rebase && git push',
 			'git cherry-pick abc123; git push',
-			'git -C . stash && git push'
+			'git -C . stash && git push',
+			"sh -c 'git pull --rebase && git push'",
+			'out=$(git commit -qam wip && git push 2>&1)',
+			'npm version patch && git push --follow-tags',
+			'pnpm version minor; git push'
 		]) {
 			const blocked = run(command, repo, state);
 			expect(blocked.code, command).toBe(2);
@@ -168,6 +178,7 @@ describe('pre-push-gate hook', () => {
 			'git log --grep "Refuse pushd and --git-dir" && git push',
 			`cd ${repo} && bash scripts/check.sh && grep -c TODO x && git push`,
 			`env X=1 git -C ${repo} push`,
+			`env -u NAME git -C ${repo} push`,
 			`git tag -a v1 -m "$(cat <<'EOF'\nDon't block\nEOF\n)" && git push`,
 			`cat <<EOF\n  EOF\ncd ${other}\nEOF\ngit push`,
 			`git -C ${repo} push --dry-run`
@@ -219,6 +230,7 @@ describe('pre-push-gate hook', () => {
 		// A body that mentions a push might be fed to a shell, so it is not set aside.
 		for (const command of [
 			`bash <<'EOF'\ngit push origin main\nEOF`,
+			`bash <<'EOF'\n"git" push origin main\nEOF`,
 			`sh -s <<EOF\ncd ${other}; git push\nEOF`,
 			`cat <<'EOF'\ngit push origin main\nEOF\ngit status`
 		]) {
@@ -269,7 +281,9 @@ describe('pre-push-gate hook', () => {
 			run(`git push -u origin "$(git -C ${other} branch --show-current)"`, repo, state).code
 		).toBe(0);
 		expect(run(`git -c core.sshCommand="ssh -C x" push`, repo, state).code).toBe(0);
-		expect(run(`git -c core.sshCommand="ssh -C x" -C ${other} push`, repo, state).code).toBe(2);
+		const refused = run(`git -c core.sshCommand="ssh -C x" -C ${other} push`, repo, state);
+		expect(refused.code).toBe(2);
+		expect(refused.stderr).toContain('the gates have not passed for demo');
 	});
 
 	it('blocks a target with no working tree', () => {

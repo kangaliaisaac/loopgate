@@ -120,7 +120,7 @@ function hdparse(i,   j, k, w, word) {
 		line = $0; if (hdd) sub(/^\t+/, "", line)
 		if (!hdq && ($0 ~ /\$\(/ || index($0, "`"))) bad = 1
 		# A body fed to a shell would run it, so one that mentions a push is not set aside.
-		if ($0 ~ /(^|[^[:alnum:]_.-])git[ \t]+.*push/) bad = 1
+		if ($0 ~ /(^|[^[:alnum:]_.-])git["\047]?[ \t]+.*push/) bad = 1
 		if (line == hd) inhd = 0
 		next
 	}
@@ -167,7 +167,7 @@ segments=$(printf '%s\n' "$command" |
 	awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' |
 	awk -v blank=0 "$scan" |
 	tr ';&|()`' '\n\n\n\n\n\n' |
-	tr '\001\002\003\004\005\006\007' ';&|()` ')
+	tr '\001\002\003\004\005\006\007' ';&|()`;')
 # A shell word: plain characters, backslash escapes and quoted runs in any mix (a="b c", with\ space).
 val="(([^[:space:]\"${sq}\\\\]|\\\\.|\"[^\"]*\"|${sq}[^${sq}]*${sq})+)"
 opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|exec-path|super-prefix|attr-source|config-env)[[:space:]]+${val}|--[a-z-]+(=${val})?|-[pP])"
@@ -175,7 +175,7 @@ opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|e
 # and may itself be quoted.
 push_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
 # `cd`, optionally after the words that open a branch or loop body; group 4 holds the path.
-mover_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?(commit|checkout|switch|reset|rebase|pull|merge|cherry-pick|revert|am|stash)[\"${sq}]?([^[:alnum:]_-]|\$)"
+mover_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?(commit|checkout|switch|reset|rebase|pull|merge|cherry-pick|revert|am|stash)[\"${sq}]?([^[:alnum:]_-]|\$)|(^|[^[:alnum:]_.-])(npm|yarn|pnpm)[[:space:]]+version([^[:alnum:]_-]|\$)"
 cd_re="^[[:space:]]*(((then|do|else|elif|if|while|until|!|command|builtin)[[:space:]]+)*)cd[[:space:]]+${val}"
 # The -C values among git's own options in "git [options] push": the words after `git` are read one
 # at a time, and the word after an option that takes a value is that value, not an option.
@@ -216,11 +216,14 @@ while IFS= read -r seg; do
 		continue
 	fi
 	# A command before the push that moves HEAD or the branch changes what the push sends.
+	# A segment can hold both (a quoted script, a substitution): it then moves HEAD and pushes.
 	if printf '%s\n' "$seg" | grep -Eq "$mover_re"; then
 		moved=1
-		continue
 	fi
 	printf '%s\n' "$seg" | grep -Eq "$push_re" || continue
+	# One segment with several pushes (a quoted script) is judged as one: refuse rather than guess.
+	pushes=$(printf '%s\n' "$seg" | re="$push_re" awk '{ s = $0; c = 0; while (match(s, ENVIRON["re"])) { c++; s = substr(s, RSTART + RLENGTH) } print c }')
+	[ "$pushes" -gt 1 ] && ambiguous=1
 	# Nothing is sent by a dry run; look only after `push`, and not at the value of -o.
 	# The text of quotes and substitutions is blanked, so a `head -n 1` inside one is not a flag.
 	rest=$(printf '%s\n' "$seg" | re="$push_re" awk 'match($0, ENVIRON["re"]) { print substr($0, RSTART + RLENGTH) }' |
@@ -263,17 +266,35 @@ fi
 # pushd is blanked first. A cd with plain `&&` or `;` around it is followed segment by segment.
 flat=$(printf '%s\n' "$command" | awk -v blank=1 "$scan" | tr '\n\007' '  ')
 # shellcheck disable=SC2016 # a regular expression: the backtick is literal
-dir_word='(^|[[:space:];&|(`])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir|(^|[[:space:];&|(`])env([[:space:]]+(-[^C[:space:]]*|[A-Za-z_]+=[^[:space:]]*))*[[:space:]]+-[[:alpha:]]*C'
+dir_word='(^|[[:space:];&|(`])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir'
+# `env` (or genv, /usr/bin/env) with -C or --chdir among its own options, which end at the first
+# word that is neither an option nor NAME=value; -u and -S take the next word as their value.
+# shellcheck disable=SC2016 # an awk program
+env_c='
+{
+	for (i = 1; i <= NF; i++) if ($i ~ /(^|\/)g?env$/) {
+		pv = ""
+		for (j = i + 1; j <= NF; j++) {
+			t = $j
+			if (pv ~ /^-[uS]$/) { pv = ""; continue }
+			if (t !~ /^-/ && t !~ /=/) break
+			if (t ~ /^-[[:alpha:]]*C/ || t ~ /^--chdir/) found = 1
+			pv = t
+		}
+	}
+}
+END { exit !found }'
 # shellcheck disable=SC2016 # a regular expression: the backtick is literal
 cd_in_group='[({`]([^)}`]*[[:space:];&|(])?cd[[:space:]]'
 other_shell='(^|[^[:alnum:]_.-])(ba|z|da|k)?sh([[:space:]]+[^[:space:];&|]+)*[[:space:]]+-[[:alpha:]]*c([[:space:]]|$)|(^|[[:space:];&|(])eval([[:space:]]|$)'
 if [ -n "$ambiguous" ] ||
 	printf '%s\n' "$flat" | grep -Eq "$dir_word" ||
+	printf '%s\n' "$flat" | awk "$env_c" ||
 	printf '%s\n' "$flat" | grep -Eq "$cd_in_group" ||
 	printf '%s\n' "$raw" | grep -Eq "[\"${sq}]cd[[:space:]]" ||
 	{ printf '%s\n' "$raw" | grep -Eq '(^|[[:space:];&|(`"'"'"'])cd[[:space:]]' &&
 		printf '%s\n' "$raw" | grep -Eq "$other_shell"; }; then
-	echo "Blocked: the repo this command pushes cannot be told (a cd inside a group, substitution or other shell; pushd, GIT_DIR, --git-dir, --chdir or several -C). Run the push on its own, with -C <dir> if needed." >&2
+	echo "Blocked: the repo this command pushes cannot be told (a cd inside a group, substitution or other shell; pushd, GIT_DIR, --git-dir, --chdir, env -C, several -C, or several pushes in one quoted script). Run the push on its own, with -C <dir> if needed." >&2
 	exit 2
 fi
 
