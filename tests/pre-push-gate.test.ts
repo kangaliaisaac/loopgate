@@ -87,6 +87,84 @@ describe('pre-push-gate hook', () => {
 		}
 	});
 
+	it('catches git by a path, a backslash or quotes, and options with quoted values', () => {
+		const { repo, state } = fixture(true);
+		for (const command of [
+			'/usr/bin/git push',
+			'/opt/homebrew/bin/git push origin main',
+			'\\git push',
+			'"git" push',
+			"'git' push",
+			"git -c 'core.sshCommand=ssh -i ~/.ssh/k' push",
+			'git --namespace "a b" push'
+		]) {
+			expect(run(command, repo, state).code, command).toBe(2);
+		}
+	});
+
+	it('judges a push by the repo a cd inside if, for or then moved into', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const other = fixture(true, 'other').repo;
+		for (const command of [
+			`if true; then cd ${other}; git push; fi`,
+			`for r in x; do cd ${other}; git push; done`,
+			`if cd ${other}; then git push; fi`,
+			`command cd ${other} && git push`
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('the gates have not passed for demo');
+		}
+		expect(run(`git push; cd ${other}`, repo, state).code).toBe(0);
+	});
+
+	it('does not refuse an ordinary push for a $( ) or ${ } argument or a scope in a commit title', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		for (const command of [
+			'git push -u origin "$(git branch --show-current)"',
+			'git commit -m "fix(hook): x" && git push',
+			'git push origin "${BRANCH}"'
+		]) {
+			expect(run(command, repo, state).code, command).toBe(0);
+		}
+	});
+
+	it('refuses a cd mixed with sh -c, and paths with a variable or several -C', () => {
+		const { repo, state } = fixture(true);
+		const cases: [string, string][] = [
+			[`bash -c 'cd ${repo} && git push'`, 'cannot be told'],
+			[`eval "cd ${repo}; git push"`, 'cannot be told'],
+			[`git -C ${repo} -C . push`, 'several -C'],
+			['git -C "$REPO" push', 'has a variable']
+		];
+		for (const [command, reason] of cases) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain(reason);
+		}
+	});
+
+	it('expands a leading ~ in a cd or -C path', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const home = join(repo, '..');
+		const env = { HOME: home };
+		const homeRun = (command: string) =>
+			spawnSync('sh', [HOOK], {
+				input: JSON.stringify({ tool_input: { command }, cwd: tmpdir() }),
+				env: { ...process.env, ...env, LOOPGATE_STATE_DIR: state },
+				encoding: 'utf8'
+			}).status;
+		expect(homeRun('git -C ~/demo push')).toBe(0);
+		expect(homeRun('cd ~/demo && git push')).toBe(0);
+		expect(homeRun('cd ~ && git -C demo push')).toBe(0);
+	});
+
 	it('does not mistake a mention of pushing for a push', () => {
 		const { repo, state } = fixture(true);
 		for (const command of [

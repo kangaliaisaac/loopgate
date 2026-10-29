@@ -276,6 +276,19 @@ describe('collect', () => {
 		expect(got.findings.some((f) => f.source === 'check-summary')).toBe(true);
 	});
 
+	it('prefers an exact check name over one reported under another workflow', () => {
+		const both = routes({
+			[`${base}/commits/abcdef1234567/check-runs`]: {
+				check_runs: [
+					{ id: 3, name: 'lint / review', output: { title: 'Other', summary: 'x', text: null } },
+					{ id: 2, name: 'review', output: { title: 'Review', summary: 'mine', text: null } }
+				]
+			}
+		});
+		const got = collect(deps(fakeGh(both)), opts);
+		expect(got.findings.find((f) => f.source === 'check-summary')?.id).toBe('check-2');
+	});
+
 	it('warns when the check run is missing, and skips an empty check output', () => {
 		const missing = collect(deps(fakeGh(routes())), { ...opts, check: 'nope' });
 		expect(missing.warnings).toEqual(['No check run named "nope" at abcdef1.', STALE_WARNING]);

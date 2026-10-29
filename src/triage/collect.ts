@@ -148,9 +148,9 @@ export function collect(
 		warnings.push(`check runs: ${PAGE} items is the page limit, so there may be more.`);
 	}
 	// A reusable workflow's job is reported as "<caller job> / <called job>", so match the tail too.
-	const check = runs.check_runs.find(
-		(run) => run.name === options.check || run.name.endsWith(` / ${options.check}`)
-	);
+	const check =
+		runs.check_runs.find((run) => run.name === options.check) ??
+		runs.check_runs.find((run) => run.name.endsWith(` / ${options.check}`));
 	if (check === undefined) {
 		warnings.push(`No check run named "${options.check}" at ${headSha.slice(0, 7)}.`);
 	} else {
