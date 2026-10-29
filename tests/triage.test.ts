@@ -276,6 +276,22 @@ describe('collect', () => {
 		expect(got.findings.some((f) => f.source === 'check-summary')).toBe(true);
 	});
 
+	it('does not pick between several checks that only end in the check name', () => {
+		const two = routes({
+			[`${base}/commits/abcdef1234567/check-runs`]: {
+				check_runs: [
+					{ id: 3, name: 'lint / review', output: { title: 'Other', summary: 'x', text: null } },
+					{ id: 2, name: 'review / review', output: { title: 'Mine', summary: 'y', text: null } }
+				]
+			}
+		});
+		const got = collect(deps(fakeGh(two)), opts);
+		expect(got.warnings[0]).toBe(
+			'2 check runs end in "/ review" (lint / review, review / review): not picking one.'
+		);
+		expect(got.findings.some((f) => f.source === 'check-summary')).toBe(false);
+	});
+
 	it('prefers an exact check name over one reported under another workflow', () => {
 		const both = routes({
 			[`${base}/commits/abcdef1234567/check-runs`]: {

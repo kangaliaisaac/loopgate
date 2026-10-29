@@ -148,10 +148,13 @@ export function collect(
 		warnings.push(`check runs: ${PAGE} items is the page limit, so there may be more.`);
 	}
 	// A reusable workflow's job is reported as "<caller job> / <called job>", so match the tail too.
-	const check =
-		runs.check_runs.find((run) => run.name === options.check) ??
-		runs.check_runs.find((run) => run.name.endsWith(` / ${options.check}`));
-	if (check === undefined) {
+	const tails = runs.check_runs.filter((run) => run.name.endsWith(` / ${options.check}`));
+	const check = runs.check_runs.find((run) => run.name === options.check) ?? tails[0];
+	if (check !== undefined && check.name !== options.check && tails.length > 1) {
+		warnings.push(
+			`${tails.length} check runs end in "/ ${options.check}" (${tails.map((r) => r.name).join(', ')}): not picking one.`
+		);
+	} else if (check === undefined) {
 		warnings.push(`No check run named "${options.check}" at ${headSha.slice(0, 7)}.`);
 	} else {
 		const text = [check.output.title, check.output.summary, check.output.text]
