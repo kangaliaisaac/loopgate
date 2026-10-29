@@ -96,10 +96,31 @@ scan='
 function mk(c) { return c == ";" ? "\001" : c == "&" ? "\002" : c == "|" ? "\003" : c == "(" ? "\004" : c == ")" ? "\005" : c == "`" ? "\006" : c }
 function lit(c) { return blank ? "x" : mk(c) }
 function sub_(c) { return blank == 2 ? "x" : blank ? c : mk(c) }
+# A heredoc operator at position i: read its delimiter, and return where to carry on.
+function hdparse(i,   j, k, w, word) {
+	j = i + 2; hdd = 0
+	if (substr($0, j, 1) == "-") { hdd = 1; j++ }
+	while (substr($0, j, 1) ~ /[ \t]/) j++
+	w = substr($0, j, 1); hdq = 0
+	if (w == "\047" || w == "\"") {
+		k = index(substr($0, j + 1), w); hdq = 1
+		if (k == 0) { bad = 1; k = n - j + 1 }
+		word = substr($0, j + 1, k - 1); j = j + k + 1
+	} else {
+		k = j; while (k <= n && substr($0, k, 1) !~ /[ \t;&|()<>]/) k++
+		word = substr($0, j, k - j); j = k
+		if (substr(word, 1, 1) == "\\") { hdq = 1; word = substr(word, 2) }
+	}
+	if (word == "") bad = 1
+	hd = word; pend = 1
+	return j - 1
+}
 {
 	if (inhd) {
-		line = $0; sub(/^[ \t]+/, "", line)
+		line = $0; if (hdd) sub(/^\t+/, "", line)
 		if (!hdq && ($0 ~ /\$\(/ || index($0, "`"))) bad = 1
+		# A body fed to a shell would run it, so one that mentions a push is not set aside.
+		if ($0 ~ /(^|[^[:alnum:]_.-])git[ \t]+.*push/) bad = 1
 		if (line == hd) inhd = 0
 		next
 	}
@@ -109,6 +130,8 @@ function sub_(c) { return blank == 2 ? "x" : blank ? c : mk(c) }
 		if (q == "\047") { if (c == "\047") { q = ""; out = out c } else out = out lit(c) }
 		else if (depth > 0) {
 			if (iq != "") { if (c == iq) iq = ""; out = out sub_(c) }
+			else if (c == "<" && d == "<" && substr($0, i + 2, 1) == "<") { out = out sub_("<<<"); i += 2 }
+			else if (c == "<" && d == "<") i = hdparse(i)
 			else if (c == "\047" || c == "\"") { iq = c; out = out sub_(c) }
 			else { if (c == "(") depth++; else if (c == ")") { depth--; if (depth == 0) q = back }; out = out sub_(c) }
 		}
@@ -122,22 +145,7 @@ function sub_(c) { return blank == 2 ? "x" : blank ? c : mk(c) }
 		}
 		else if (c == "\\") { out = out c; i++; if (i <= n) out = out mk(substr($0, i, 1)) }
 		else if (c == "<" && d == "<" && substr($0, i + 2, 1) == "<") { out = out "<<<"; i += 2 }
-		else if (c == "<" && d == "<") {
-			j = i + 2; if (substr($0, j, 1) == "-") j++
-			while (substr($0, j, 1) ~ /[ \t]/) j++
-			w = substr($0, j, 1); hdq = 0
-			if (w == "\047" || w == "\"") {
-				k = index(substr($0, j + 1), w); hdq = 1
-				if (k == 0) { bad = 1; k = n - j + 1 }
-				word = substr($0, j + 1, k - 1); j = j + k + 1
-			} else {
-				k = j; while (k <= n && substr($0, k, 1) !~ /[ \t;&|()<>]/) k++
-				word = substr($0, j, k - j); j = k
-				if (substr(word, 1, 1) == "\\") { hdq = 1; word = substr(word, 2) }
-			}
-			if (word == "") bad = 1
-			hd = word; pend = 1; i = j - 1
-		}
+		else if (c == "<" && d == "<") i = hdparse(i)
 		else if (c == "#" && p ~ /[ \t;&|(]/) break
 		else if (c == "\047") { q = c; out = out c }
 		else if (c == "\"") { q = c; out = out c }
@@ -167,6 +175,7 @@ opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|e
 # and may itself be quoted.
 push_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
 # `cd`, optionally after the words that open a branch or loop body; group 4 holds the path.
+mover_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?(commit|checkout|switch|reset|rebase|pull|merge|cherry-pick|revert|am|stash)[\"${sq}]?([^[:alnum:]_-]|\$)"
 cd_re="^[[:space:]]*(((then|do|else|elif|if|while|until|!|command|builtin)[[:space:]]+)*)cd[[:space:]]+${val}"
 # The -C values among git's own options in "git [options] push": the words after `git` are read one
 # at a time, and the word after an option that takes a value is that value, not an option.
@@ -191,6 +200,8 @@ unquote() { sed -E "s/[\"${sq}\\\\]//g"; }
 cur=${cwd:-.}
 targets=""
 ambiguous=""
+moved=""
+moved_push=""
 while IFS= read -r seg; do
 	# `cd` moves where the following segments run.
 	if printf '%s\n' "$seg" | grep -Eq "$cd_re"; then
@@ -198,24 +209,35 @@ while IFS= read -r seg; do
 		cur=$(resolve "$to" "$cur")
 		continue
 	fi
-	printf '%s\n' "$seg" | grep -Eq "$push_re" || continue
-	# A segment that only prints or searches for the text is not a push.
-	# Unless a substitution inside it runs the push: echo "$(git push)" does.
+	# A segment that only prints or searches for the text is not a command.
+	# Unless a substitution inside it runs one: echo "$(git push)" does.
 	if printf '%s\n' "$seg" | grep -Eq '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]' &&
 		! printf '%s\n' "$seg" | grep -Eq '\$\(|`'; then
 		continue
 	fi
+	# A command before the push that moves HEAD or the branch changes what the push sends.
+	if printf '%s\n' "$seg" | grep -Eq "$mover_re"; then
+		moved=1
+		continue
+	fi
+	printf '%s\n' "$seg" | grep -Eq "$push_re" || continue
 	# Nothing is sent by a dry run; look only after `push`, and not at the value of -o.
 	# The text of quotes and substitutions is blanked, so a `head -n 1` inside one is not a flag.
 	rest=$(printf '%s\n' "$seg" | re="$push_re" awk 'match($0, ENVIRON["re"]) { print substr($0, RSTART + RLENGTH) }' |
 		sed -E "s/(-o|--push-option)([[:space:]]+|=)${val}//g" | awk -v blank=2 "$scan")
-	printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)' && continue
+	# Outside quotes the split leaves no separator in `rest`; one that is left means the push sits
+	# inside a quote or substitution, where a -n may belong to another command: check it as a push.
+	if ! printf '%s\n' "$rest" | grep -q '[;&|)`]' &&
+		printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)'; then
+		continue
+	fi
 	# -C counts only as a git option, between `git` and `push`, not as text inside another word.
 	pre=$(printf '%s\n' "$seg" | re="$push_re" awk 'match($0, ENVIRON["re"]) { print substr($0, RSTART, RLENGTH) }')
 	cdirs=$(printf '%s\n' "$pre" | val="$val" awk "$git_c")
 	dir=$(printf '%s\n' "$cdirs" | head -n 1 | unquote)
 	# Several -C options compose, each relative to the one before: not worth resolving.
 	[ "$(printf '%s\n' "$cdirs" | grep -c .)" -gt 1 ] && ambiguous=1
+	[ -n "$moved" ] && moved_push=1
 	targets="$targets
 $(resolve "${dir:-.}" "$cur")"
 done <<EOF
@@ -224,10 +246,14 @@ EOF
 raw=$(printf '%s' "$command" | tr '\n' ' ')
 # A command the scan could not balance that still looks like it pushes is refused, not guessed at.
 if unbalanced "$segments" && printf '%s\n' "$raw" | grep -Eq "$push_re"; then
-	echo "Blocked: this command has an open quote, substitution or heredoc, so the repo it pushes cannot be told. Run the push on its own." >&2
+	echo "Blocked: this command has an open quote, substitution or heredoc (or a heredoc body that mentions a push), so the repo it pushes cannot be told. Run the push on its own." >&2
 	exit 2
 fi
 [ -n "$targets" ] || exit 0
+if [ -n "$moved_push" ]; then
+	echo "Blocked: an earlier command in this one moves HEAD (commit, checkout, pull, rebase, ...), so the gate and review records for the current HEAD say nothing about what is pushed. Commit first, run the gates and the review, then push on its own." >&2
+	exit 2
+fi
 
 # Where a push goes is not knowable from these, so refuse rather than guess. Always: a directory the
 # hook cannot follow (pushd, popd, GIT_DIR, --git-dir, --work-tree, --chdir) or several -C. And a cd
@@ -236,10 +262,11 @@ fi
 # one line, so a command over several lines is no different from one line; a quoted mention of cd or
 # pushd is blanked first. A cd with plain `&&` or `;` around it is followed segment by segment.
 flat=$(printf '%s\n' "$command" | awk -v blank=1 "$scan" | tr '\n\007' '  ')
-dir_word='(^|[[:space:];&|(`])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir'
+# shellcheck disable=SC2016 # a regular expression: the backtick is literal
+dir_word='(^|[[:space:];&|(`])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir|(^|[[:space:];&|(`])env([[:space:]]+(-[^C[:space:]]*|[A-Za-z_]+=[^[:space:]]*))*[[:space:]]+-[[:alpha:]]*C'
 # shellcheck disable=SC2016 # a regular expression: the backtick is literal
 cd_in_group='[({`]([^)}`]*[[:space:];&|(])?cd[[:space:]]'
-other_shell='(^|[^[:alnum:]_.-])(ba|z|da|k)?sh([[:space:]]+[^[:space:]]+)*[[:space:]]+-[[:alpha:]]*c([[:space:]]|$)|(^|[[:space:];&|(])eval([[:space:]]|$)'
+other_shell='(^|[^[:alnum:]_.-])(ba|z|da|k)?sh([[:space:]]+[^[:space:];&|]+)*[[:space:]]+-[[:alpha:]]*c([[:space:]]|$)|(^|[[:space:];&|(])eval([[:space:]]|$)'
 if [ -n "$ambiguous" ] ||
 	printf '%s\n' "$flat" | grep -Eq "$dir_word" ||
 	printf '%s\n' "$flat" | grep -Eq "$cd_in_group" ||
