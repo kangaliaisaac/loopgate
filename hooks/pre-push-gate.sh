@@ -78,10 +78,47 @@ resolve() {
 # line continuations), and treat every segment that runs `git [global options] push` as a push.
 # Only the options git accepts before a subcommand may sit between `git` and `push`, so a commit
 # message that mentions pushing is not a push.
-# shellcheck disable=SC2020 # six separators map to six newlines on purpose
+#
+# A separator inside quotes, backticks or $( ) is part of a word, not the end of a command, so it is
+# masked (to control characters 1 to 6) before the split and restored after it; a newline inside
+# one becomes character 7, then a space. With blank=1 the text of plain quoted strings is replaced
+# by x instead, so a later check does not read a quoted mention of cd or pushd as a command; the
+# text of $( ) and backticks is kept, because that does run.
+# shellcheck disable=SC2016 # an awk program: nothing in it is for the shell to expand
+scan='
+function mk(c) { return c == ";" ? "\001" : c == "&" ? "\002" : c == "|" ? "\003" : c == "(" ? "\004" : c == ")" ? "\005" : c == "`" ? "\006" : c }
+function lit(c) { return blank ? "x" : mk(c) }
+function sub_(c) { return blank ? c : mk(c) }
+{
+	n = length($0); out = ""
+	for (i = 1; i <= n; i++) {
+		c = substr($0, i, 1); d = substr($0, i + 1, 1)
+		if (q == "\047") { if (c == "\047") { q = ""; out = out c } else out = out lit(c) }
+		else if (depth > 0) { if (c == "(") depth++; else if (c == ")") { depth--; if (depth == 0) q = back }; out = out sub_(c) }
+		else if (q == "`") { if (c == "`") q = back; out = out sub_(c) }
+		else if (q == "\"") {
+			if (c == "\\") { out = out lit(c); i++; if (i <= n) out = out lit(substr($0, i, 1)) }
+			else if (c == "\"") { q = ""; out = out c }
+			else if (c == "$" && d == "(") { back = q; depth = 1; i++; out = out "$" sub_("(") }
+			else if (c == "`") { back = q; q = "`"; out = out sub_(c) }
+			else out = out lit(c)
+		}
+		else if (c == "\\") { out = out c; i++; if (i <= n) out = out mk(substr($0, i, 1)) }
+		else if (c == "\047") { q = c; out = out c }
+		else if (c == "\"") { q = c; out = out c }
+		else if (c == "`") { back = q; q = "`"; out = out sub_(c) }
+		else if (c == "$" && d == "(") { back = q; depth = 1; i++; out = out "$" sub_("(") }
+		else out = out c
+	}
+	if (q != "" || depth > 0) buf = buf out "\007"; else { print buf out; buf = "" }
+}
+END { if (buf != "") print buf }'
+# shellcheck disable=SC2020 # separators map to newlines on purpose
 segments=$(printf '%s\n' "$command" |
 	awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' |
-	tr ';&|()`' '\n\n\n\n\n\n')
+	awk -v blank=0 "$scan" |
+	tr ';&|()`' '\n\n\n\n\n\n' |
+	tr '\001\002\003\004\005\006\007' ';&|()` ')
 # A shell word: plain characters, backslash escapes and quoted runs in any mix (a="b c", with\ space).
 val="(([^[:space:]\"${sq}\\\\]|\\\\.|\"[^\"]*\"|${sq}[^${sq}]*${sq})+)"
 opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|exec-path|super-prefix|attr-source|config-env)[[:space:]]+${val}|--[a-z-]+(=${val})?|-[pP])"
@@ -106,10 +143,14 @@ while IFS= read -r seg; do
 	fi
 	printf '%s\n' "$seg" | grep -Eq "$push_re" || continue
 	# A segment that only prints or searches for the text is not a push.
-	printf '%s\n' "$seg" | grep -Eq '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]' && continue
+	# Unless a substitution inside it runs the push: echo "$(git push)" does.
+	if printf '%s\n' "$seg" | grep -Eq '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]' &&
+		! printf '%s\n' "$seg" | grep -Eq '\$\(|`'; then
+		continue
+	fi
 	# Nothing is sent by a dry run; look only after `push`, and not at the value of -o.
-	rest=$(printf '%s\n' "$seg" | awk -v re="$push_re" 'match($0, re) { print substr($0, RSTART + RLENGTH) }' |
-		sed -E 's/(-o|--push-option)[[:space:]]+[^[:space:]]+//g')
+	rest=$(printf '%s\n' "$seg" | re="$push_re" awk 'match($0, ENVIRON["re"]) { print substr($0, RSTART + RLENGTH) }' |
+		sed -E "s/(-o|--push-option)([[:space:]]+|=)${val}//g")
 	printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)' && continue
 	dir=$(printf '%s\n' "$seg" | sed -nE "$dir_re" | unquote)
 	# Several -C options compose, each relative to the one before: not worth resolving.
@@ -123,31 +164,38 @@ EOF
 
 # Where a push goes is not knowable from these, so refuse rather than guess. Always: a directory the
 # hook cannot follow (pushd, popd, GIT_DIR, --git-dir, --work-tree, --chdir) or several -C. And a cd
-# in a command that also has a group, a substitution ($( ), backticks, ${ }), sh -c or eval, since
-# that cd may or may not reach the push. The check runs on one line, so a command over several lines
-# is no different from one line. A cd with plain `&&` or `;` around it is followed segment by segment.
-flat=$(printf '%s' "$command" | tr '\n' ' ')
-dir_word='(^|[[:space:];&|(`"'"'"'])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir'
-cd_word='(^|[[:space:];&|(`"'"'"'])cd[[:space:]]'
+# that sits inside a group, $( ) or backticks, or that is handed to another shell (sh -c in any form,
+# eval, or a cd right after a quote), since that cd may or may not reach the push. The checks run on
+# one line, so a command over several lines is no different from one line; a quoted mention of cd or
+# pushd is blanked first. A cd with plain `&&` or `;` around it is followed segment by segment.
+raw=$(printf '%s' "$command" | tr '\n' ' ')
+flat=$(printf '%s\n' "$command" | awk -v blank=1 "$scan" | tr '\n\007' '  ')
+dir_word='(^|[[:space:];&|(`])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir'
+# shellcheck disable=SC2016 # a regular expression: the backtick is literal
+cd_in_group='[({`]([^)}`]*[[:space:];&|(])?cd[[:space:]]'
+other_shell='(^|[^[:alnum:]_.-])(ba|z|da|k)?sh[[:space:]]+-[[:alpha:]]*c([[:space:]]|$)|(^|[[:space:];&|(])eval([[:space:]]|$)'
 if [ -n "$ambiguous" ] ||
 	printf '%s\n' "$flat" | grep -Eq "$dir_word" ||
-	{ printf '%s\n' "$flat" | grep -Eq "$cd_word" &&
-		printf '%s\n' "$flat" | grep -Eq '[({`]|(^|[[:space:]])((ba|z|da)?sh[[:space:]]+-c|eval)([[:space:]]|$)'; }; then
-	echo "Blocked: the repo this command pushes cannot be told (a cd mixed with a group, substitution, sh -c or eval; pushd, GIT_DIR, --git-dir, --chdir or several -C). Run the push on its own, with -C <dir> if needed." >&2
+	printf '%s\n' "$flat" | grep -Eq "$cd_in_group" ||
+	printf '%s\n' "$raw" | grep -Eq "[\"${sq}]cd[[:space:]]" ||
+	{ printf '%s\n' "$raw" | grep -Eq '(^|[[:space:];&|(`"'"'"'])cd[[:space:]]' &&
+		printf '%s\n' "$raw" | grep -Eq "$other_shell"; }; then
+	echo "Blocked: the repo this command pushes cannot be told (a cd inside a group, substitution or other shell; pushd, GIT_DIR, --git-dir, --chdir or several -C). Run the push on its own, with -C <dir> if needed." >&2
 	exit 2
 fi
+
+# A variable or command substitution in a path is not expanded here: refuse before checking any.
+case "$targets" in
+*'$'* | *'`'*)
+	echo "Blocked: the repo this command pushes cannot be told (a path has a variable or substitution in it). Use a literal path." >&2
+	exit 2
+	;;
+esac
 
 # Every distinct target must pass.
 done_dirs=""
 while IFS= read -r target; do
 	[ -n "$target" ] || continue
-	# A variable or command substitution in the path is not expanded here.
-	case "$target" in
-	*'$'* | *'`'*)
-		echo "Blocked: the repo this command pushes cannot be told ('$target' has a variable or substitution in it). Use a literal path." >&2
-		exit 2
-		;;
-	esac
 	case "
 $done_dirs
 " in *"

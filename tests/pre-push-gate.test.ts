@@ -104,6 +104,8 @@ describe('pre-push-gate hook', () => {
 			'git -c core.sshCommand="ssh -i ~/.ssh/k" push',
 			'git -C /a/with\\ space push',
 			'git --attr-source HEAD push',
+			"git -c credential.helper='!f() { echo password=x; }; f' push",
+			"git push -o 'merge_request.description=adds -n handling' origin main",
 			'git --namespace "a b" push'
 		]) {
 			expect(run(command, repo, state).code, command).toBe(2);
@@ -135,7 +137,12 @@ describe('pre-push-gate hook', () => {
 		for (const command of [
 			'git push -u origin "$(git branch --show-current)"',
 			'git commit -m "fix(hook): x" && git push',
-			'git push origin "${BRANCH}"'
+			'git push origin "${BRANCH}"',
+			`cd ${repo} && git push -u origin "$(git branch --show-current)"`,
+			`cd ${repo} && git commit -m "fix(hook): x" && git push`,
+			`cd ${repo} && git push origin "\${BRANCH}"`,
+			'git commit -m "Refuse pushd and --git-dir" && git push',
+			`git -C ${repo} push --dry-run`
 		]) {
 			expect(run(command, repo, state).code, command).toBe(0);
 		}
@@ -147,7 +154,14 @@ describe('pre-push-gate hook', () => {
 			[`bash -c 'cd ${repo} && git push'`, 'cannot be told'],
 			[`eval "cd ${repo}; git push"`, 'cannot be told'],
 			[`git -C ${repo} -C . push`, 'several -C'],
-			['git -C "$REPO" push', 'has a variable']
+			['git -C "$REPO" push', 'has a variable'],
+			['git -C "$(git rev-parse --show-toplevel)" push', 'has a variable'],
+			['git -C `pwd` push', 'has a variable'],
+			['git push; git -C "$(pwd)/../x" push', 'has a variable'],
+			[`bash -lc 'cd ${repo} && git push'`, 'cannot be told'],
+			[`sh -ec 'cd ${repo}; git push'`, 'cannot be told'],
+			[`/bin/sh -c 'cd ${repo}; git push'`, 'cannot be told'],
+			[`ksh -c "cd ${repo}; git push"`, 'cannot be told']
 		];
 		for (const [command, reason] of cases) {
 			const blocked = run(command, repo, state);
