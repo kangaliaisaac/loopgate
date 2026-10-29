@@ -1,0 +1,56 @@
+{
+	"name": "loopgate",
+	"version": "0.1.0",
+	"description": "Gates and reviews for AI-assisted changes: CI gate runner, pre-push review, review triage and a push hook.",
+	"private": false,
+	"license": "MIT",
+	"author": "Kang'alia Nyamu",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kangaliaisaac/loopgate.git"
+	},
+	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"bin",
+		"src",
+		"hooks",
+		"agents",
+		"skills",
+		"docs",
+		".github/workflows/claude-review.yml"
+	],
+	"scripts": {
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run --coverage",
+		"ci-gate-runner": "node bin/ci-gate-runner.ts",
+		"pre-push-review": "node bin/pre-push-review.ts",
+		"review-triage": "node bin/review-triage.ts",
+		"build": "tsc -p tsconfig.build.json",
+		"prepare": "npm run build"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5",
+		"@vitest/coverage-v8": "^5.0.5",
+		"prettier": "^3.9.10",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.5"
+	},
+	"prettier": {
+		"useTabs": true,
+		"singleQuote": true,
+		"trailingComma": "none",
+		"printWidth": 100
+	}
+}
