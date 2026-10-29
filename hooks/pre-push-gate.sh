@@ -16,16 +16,29 @@ fi
 command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 
-# A push at the start of a command or after ; & | ( or a newline, with optional -C <dir>.
-push_re='(^|[;&|(]|&&|\|\|)[[:space:]]*git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'
-printf '%s\n' "$command" | grep -Eq "$push_re" || exit 0
+# Fail closed: any command segment (split at ; & | and newlines) that runs `git ... push` is a push,
+# whatever sits before it (then, do, env, a quoted -C path) or between git and push (-c k=v, --no-pager).
+# Segments that only print or search for the text are not.
+# shellcheck disable=SC2020 # three separators map to three newlines on purpose
+segments=$(printf '%s\n' "$command" | tr ';&|' '\n\n\n')
+push_re='(^|[[:space:]"'"'"'({])git[[:space:]]+([^[:space:]]+[[:space:]]+)*push([[:space:]"'"'"')}]|$)'
+pushes=$(printf '%s\n' "$segments" | grep -E "$push_re" | grep -Ev '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]')
+[ -n "$pushes" ] || exit 0
 
-# Nothing is sent by a dry run.
-case "$command" in *--dry-run*|*" -n "*) exit 0 ;; esac
+# Nothing is sent by a dry run, but only a push segment that is itself a dry run is skipped.
+pushes=$(printf '%s\n' "$pushes" | grep -Ev '[[:space:]](--dry-run|-n)([[:space:]]|$)')
+[ -n "$pushes" ] || exit 0
 
-dir=$(printf '%s\n' "$command" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -n 1)
-dir=${dir:-$cwd}
-dir=${dir:-.}
+# The repo being pushed: -C of the push, else the target of a cd before it, else the session directory.
+dir=$(printf '%s\n' "$pushes" | sed -nE 's/.*-C[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -n 1)
+if [ -z "$dir" ]; then
+	dir=$(printf '%s\n' "$segments" | sed -nE 's/^[[:space:]]*cd[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -n 1)
+fi
+case "$dir" in
+'') dir=${cwd:-.} ;;
+/*) ;;
+*) dir="${cwd:-.}/$dir" ;;
+esac
 
 head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
 	echo "Blocked: cannot read HEAD in '$dir', so the gate and review records cannot be checked." >&2
