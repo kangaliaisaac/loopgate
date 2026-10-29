@@ -76,9 +76,10 @@ function prepareIn(dir: string, deps: PrepareDeps): PrepareResult {
 			return fail('Nothing to review: HEAD has no commits beyond origin/main.');
 		}
 	} else {
-		// A new remote has no origin/main: the first push sends everything, so review everything.
+		// No origin/main (a new remote, another default branch, or no origin): nothing says what is
+		// already there, so review everything.
 		base = stdoutOf(git('hash-object', '-t', 'tree', '/dev/null')).trim();
-		warnings.push('origin/main does not exist, so this review covers the whole tree.');
+		warnings.push('origin/main was not found, so this review covers the whole tree.');
 	}
 	// No rename detection: a file moved out of a sensitive path must still show up there.
 	const stat = git('diff', '--numstat', '--no-renames', base, 'HEAD');

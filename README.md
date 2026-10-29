@@ -37,10 +37,21 @@ cd loopgate && npm ci
 ```json
 {
 	"gates": [
-		{ "name": "prettier", "command": "npx", "args": ["prettier", "--check", "."] },
-		{ "name": "test", "command": "npm", "args": ["test"] }
+		{
+			"name": "prettier",
+			"command": "npx",
+			"args": ["prettier", "--check", "."]
+		},
+		{
+			"name": "test",
+			"command": "npm",
+			"args": ["test"]
+		}
 	],
-	"environment": { "path": "node_modules", "fix": "run `npm ci`" }
+	"environment": {
+		"path": "node_modules",
+		"fix": "run `npm ci`"
+	}
 }
 ```
 
@@ -64,7 +75,12 @@ node <loopgate>/bin/review-triage.ts fetch --pr 12 --repo owner/name
 		"PreToolUse": [
 			{
 				"matcher": "Bash",
-				"hooks": [{ "type": "command", "command": "sh \"<loopgate>/hooks/pre-push-gate.sh\"" }]
+				"hooks": [
+					{
+						"type": "command",
+						"command": "sh \"<loopgate>/hooks/pre-push-gate.sh\""
+					}
+				]
 			}
 		]
 	}
