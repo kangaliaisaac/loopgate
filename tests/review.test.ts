@@ -80,6 +80,8 @@ interface Fake {
 	notRepo?: boolean;
 	fetchFails?: boolean;
 	noBase?: boolean;
+	/** No `origin/main`: a new remote. */
+	noRemote?: boolean;
 	base?: string;
 	head?: string;
 	numstat?: string;
@@ -105,6 +107,7 @@ function setup(fake: Fake = {}): { deps: PrepareDeps; written: Record<string, st
 		const head = fake.head ?? 'abc1234def';
 		switch (args[0]) {
 			case 'rev-parse':
+				if (args[1] === '--verify') return { code: fake.noRemote ? 1 : 0, output: '' };
 				return args[1] === '--show-toplevel'
 					? { code: 0, output: `/w/example-api\n${head}\n` }
 					: { code: 0, output: 'feat/x\n' };
@@ -224,6 +227,18 @@ describe('prepareReview', () => {
 		const diffs = calls.filter((c) => c.startsWith('diff '));
 		expect(diffs).toHaveLength(2);
 		expect(diffs.every((c) => c.includes('--no-renames'))).toBe(true);
+	});
+
+	it('reviews the whole tree, with a warning, when the remote has no origin/main', () => {
+		const calls: string[] = [];
+		const result = prepareReview('/w/example-api', setup({ noRemote: true, calls }).deps);
+		if (!result.ok) throw new Error(result.message);
+		expect(result.prepared.warnings).toContain(
+			'origin/main does not exist, so this review covers the whole tree.'
+		);
+		expect(calls.some((c) => c.startsWith('merge-base'))).toBe(false);
+		expect(calls).toContain('hash-object -t tree /dev/null');
+		expect(calls).toContain('log --format=%h %s HEAD');
 	});
 
 	it('stops when any later git call times out, instead of reading it as "no"', () => {

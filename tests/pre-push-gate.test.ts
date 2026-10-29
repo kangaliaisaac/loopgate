@@ -47,6 +47,38 @@ describe('pre-push-gate hook', () => {
 		expect(run('git push --dry-run', repo, state).code).toBe(0);
 	});
 
+	it('catches pushes behind a quoted path with a space, then/do, global options and env', () => {
+		const { repo, state } = fixture(true);
+		const spaced = join(repo, '..', 'with space');
+		mkdirSync(spaced);
+		for (const command of [
+			`git -C "${repo}" push`,
+			'if true; then git push; fi',
+			'for x in 1; do git push; done',
+			'git -c core.pager=cat push origin main',
+			'git --no-pager push',
+			'env X=1 git push',
+			"bash -c 'git push'",
+			'git commit -m "add --dry-run flag" && git push',
+			'git push && echo -n done',
+			'git push --dry-run && git push'
+		]) {
+			expect(run(command, repo, state).code, command).toBe(2);
+		}
+		expect(run('git push', spaced, state).code).toBe(2);
+	});
+
+	it('judges a cd-then-push by the repo it moves into, resolved against the session directory', () => {
+		const { repo, state, head } = fixture(true);
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		const other = join(repo, '..', 'other');
+		mkdirSync(other);
+		expect(run('git push', repo, state).code).toBe(0);
+		expect(run('cd ../other && git push', repo, state).code).toBe(2);
+		expect(run('cd ../demo && git push', other, state).code).toBe(0);
+	});
+
 	it('blocks a push in a repo with gates until they have passed for HEAD', () => {
 		const { repo, state, head } = fixture(true);
 		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));

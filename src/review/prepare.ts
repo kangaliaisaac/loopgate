@@ -65,12 +65,20 @@ function prepareIn(dir: string, deps: PrepareDeps): PrepareResult {
 			'git fetch failed or timed out: origin/main may be stale, so the diff may include merged work.'
 		);
 	}
-	const merge = git('merge-base', 'origin/main', 'HEAD');
-	if (merge.code !== 0)
-		return fail('No merge base with origin/main; cannot tell what a push would add.');
-	const base = stdoutOf(merge).trim();
-	if (base === repo.head) {
-		return fail('Nothing to review: HEAD has no commits beyond origin/main.');
+	const remote = git('rev-parse', '--verify', '--quiet', 'origin/main');
+	let base: string;
+	if (remote.code === 0) {
+		const merge = git('merge-base', 'origin/main', 'HEAD');
+		if (merge.code !== 0)
+			return fail('No merge base with origin/main; cannot tell what a push would add.');
+		base = stdoutOf(merge).trim();
+		if (base === repo.head) {
+			return fail('Nothing to review: HEAD has no commits beyond origin/main.');
+		}
+	} else {
+		// A new remote has no origin/main: the first push sends everything, so review everything.
+		base = stdoutOf(git('hash-object', '-t', 'tree', '/dev/null')).trim();
+		warnings.push('origin/main does not exist, so this review covers the whole tree.');
 	}
 	// No rename detection: a file moved out of a sensitive path must still show up there.
 	const stat = git('diff', '--numstat', '--no-renames', base, 'HEAD');
@@ -98,7 +106,9 @@ function prepareIn(dir: string, deps: PrepareDeps): PrepareResult {
 		`${repo.name}-${repo.head.slice(0, 7)}.diff`
 	);
 	deps.writeFile(diffPath, stdoutOf(diff));
-	const commits = stdoutOf(git('log', '--format=%h %s', `${base}..HEAD`))
+	const commits = stdoutOf(
+		git('log', '--format=%h %s', remote.code === 0 ? `${base}..HEAD` : 'HEAD')
+	)
 		.split('\n')
 		.filter((line) => line !== '');
 	const context = ['CLAUDE.md', 'intent.md', 'spec.md', 'plan.md']

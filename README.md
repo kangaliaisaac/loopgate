@@ -64,7 +64,7 @@ node <loopgate>/bin/review-triage.ts fetch --pr 12 --repo owner/name
 		"PreToolUse": [
 			{
 				"matcher": "Bash",
-				"hooks": [{ "type": "command", "command": "<loopgate>/hooks/pre-push-gate.sh" }]
+				"hooks": [{ "type": "command", "command": "sh \"<loopgate>/hooks/pre-push-gate.sh\"" }]
 			}
 		]
 	}
