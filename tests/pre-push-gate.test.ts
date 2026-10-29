@@ -66,6 +66,9 @@ describe('pre-push-gate hook', () => {
 			'git push && echo -n done',
 			'git push --dry-run && git push',
 			"printf 'main\\n' | xargs -n 1 git push origin",
+			'out=$(git push origin main 2>&1 | tail -n 20)',
+			"bash -c 'git push && echo -n done'",
+			"bash -c 'git push -n; git push'",
 			'nice -n 10 git push',
 			'git push -o -n origin main'
 		]) {
@@ -80,6 +83,7 @@ describe('pre-push-gate hook', () => {
 			'pushd /elsewhere && git push',
 			'GIT_DIR=/elsewhere/.git git push',
 			'git --git-dir=/elsewhere/.git push',
+			'env -C /elsewhere git push',
 			'true;pushd /elsewhere;git push',
 			'env --chdir=/elsewhere git push',
 			'x=$(cd /elsewhere && git rev-parse HEAD); git push',
@@ -130,18 +134,42 @@ describe('pre-push-gate hook', () => {
 		expect(run(`git push; cd ${other}`, repo, state).code).toBe(0);
 	});
 
-	it('does not refuse an ordinary push for a $( ) or ${ } argument or a scope in a commit title', () => {
+	it('refuses a push that follows a command moving HEAD, whatever the old HEAD recorded', () => {
 		const { repo, state, head } = fixture(true);
 		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
 		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
 		for (const command of [
+			'git commit --allow-empty -m x && git push',
+			'git checkout other && git push -u origin other',
+			'git pull --rebase && git push',
+			'git cherry-pick abc123; git push',
+			'git -C . stash && git push'
+		]) {
+			const blocked = run(command, repo, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('moves HEAD');
+		}
+		expect(run('git status && git push', repo, state).code).toBe(0);
+		expect(run('echo "git commit" && git push', repo, state).code).toBe(0);
+	});
+
+	it('does not refuse an ordinary push for a $( ) or ${ } argument or a scope in a commit title', () => {
+		const { repo, state, head } = fixture(true);
+		const other = fixture(true, 'other').repo;
+		writeFileSync(recordPath(state), JSON.stringify({ [repo]: { head, passedAt: 't' } }));
+		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
+		for (const command of [
 			'git push -u origin "$(git branch --show-current)"',
-			'git commit -m "fix(hook): x" && git push',
+			'git log --grep "fix(hook): x" && git push',
 			'git push origin "${BRANCH}"',
 			`cd ${repo} && git push -u origin "$(git branch --show-current)"`,
-			`cd ${repo} && git commit -m "fix(hook): x" && git push`,
+			`cd ${repo} && git log --grep "fix(hook): x" && git push`,
 			`cd ${repo} && git push origin "\${BRANCH}"`,
-			'git commit -m "Refuse pushd and --git-dir" && git push',
+			'git log --grep "Refuse pushd and --git-dir" && git push',
+			`cd ${repo} && bash scripts/check.sh && grep -c TODO x && git push`,
+			`env X=1 git -C ${repo} push`,
+			`git tag -a v1 -m "$(cat <<'EOF'\nDon't block\nEOF\n)" && git push`,
+			`cat <<EOF\n  EOF\ncd ${other}\nEOF\ngit push`,
 			`git -C ${repo} push --dry-run`
 		]) {
 			expect(run(command, repo, state).code, command).toBe(0);
@@ -186,9 +214,18 @@ describe('pre-push-gate hook', () => {
 			expect(blocked.code, command).toBe(2);
 			expect(blocked.stderr, command).toContain('the gates have not passed for demo');
 		}
-		// A heredoc that mentions pushing is data, not a push; a here-string is not a heredoc.
-		expect(run(`cat <<'EOF'\ngit push origin main\nEOF\ngit status`, repo, state).code).toBe(0);
+		// A here-string is not a heredoc.
 		expect(run(`cat <<< "don't" && git push`, repo, state).code).toBe(0);
+		// A body that mentions a push might be fed to a shell, so it is not set aside.
+		for (const command of [
+			`bash <<'EOF'\ngit push origin main\nEOF`,
+			`sh -s <<EOF\ncd ${other}; git push\nEOF`,
+			`cat <<'EOF'\ngit push origin main\nEOF\ngit status`
+		]) {
+			const blocked = run(command, other, state);
+			expect(blocked.code, command).toBe(2);
+			expect(blocked.stderr, command).toContain('heredoc');
+		}
 		for (const command of [
 			`echo "don't && git push`,
 			`x=$(echo 'a; git push`,
@@ -199,7 +236,7 @@ describe('pre-push-gate hook', () => {
 			expect(blocked.code, command).toBe(2);
 			expect(blocked.stderr, command).toContain('cannot be told');
 		}
-		expect(run(`echo "don't`, repo, state).code).toBe(0);
+		expect(run(`git log --grep push "don't`, repo, state).code).toBe(0);
 	});
 
 	it('refuses a cd handed to a shell that has option words before -c', () => {
