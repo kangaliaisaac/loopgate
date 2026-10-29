@@ -3,6 +3,7 @@
 # repo's gates have passed (when it has a loopgate.json) and a pre-push review is recorded with no
 # high finding. Exit 2 blocks the call and sends stderr to Claude; exit 0 lets it through. It only
 # reads the records that ci-gate-runner and pre-push-review write; it starts nothing.
+# It reads commands, not intent (ADR-0001): an alias or a shell trick can still hide a push.
 input=$(cat)
 
 # Cheap exit for every Bash call that is not a push.
@@ -15,72 +16,118 @@ fi
 
 command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
-
-# Fail closed: any command segment (split at ; & | and newlines) that runs `git ... push` is a push,
-# whatever sits before it (then, do, env, a quoted -C path) or between git and push (-c k=v, --no-pager).
-# Segments that only print or search for the text are not.
-# shellcheck disable=SC2020 # three separators map to three newlines on purpose
-segments=$(printf '%s\n' "$command" | tr ';&|' '\n\n\n')
-push_re='(^|[[:space:]"'"'"'({])git[[:space:]]+([^[:space:]]+[[:space:]]+)*push([[:space:]"'"'"')}]|$)'
-pushes=$(printf '%s\n' "$segments" | grep -E "$push_re" | grep -Ev '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]')
-[ -n "$pushes" ] || exit 0
-
-# Nothing is sent by a dry run, but only a push segment that is itself a dry run is skipped.
-pushes=$(printf '%s\n' "$pushes" | grep -Ev '[[:space:]](--dry-run|-n)([[:space:]]|$)')
-[ -n "$pushes" ] || exit 0
-
-# The repo being pushed: -C of the push, else the target of a cd before it, else the session directory.
-dir=$(printf '%s\n' "$pushes" | sed -nE 's/.*-C[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -n 1)
-if [ -z "$dir" ]; then
-	dir=$(printf '%s\n' "$segments" | sed -nE 's/^[[:space:]]*cd[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -n 1)
-fi
-case "$dir" in
-'') dir=${cwd:-.} ;;
-/*) ;;
-*) dir="${cwd:-.}/$dir" ;;
-esac
-
-head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
-	echo "Blocked: cannot read HEAD in '$dir', so the gate and review records cannot be checked." >&2
-	exit 2
-}
-top=$(git -C "$dir" rev-parse --show-toplevel)
-short=$(printf '%s' "$head" | cut -c1-7)
-# The name the tools record under: the origin remote's last path segment, else the directory.
-repo=$(git -C "$dir" remote get-url origin 2>/dev/null | sed -E 's|/+$||; s|\.git$||; s|.*[/:]||')
-repo=${repo:-$(basename "$top")}
 state="${LOOPGATE_STATE_DIR:-$HOME/.local/state/loopgate}"
+sq="'"
 
-# 1. Gates: only for a repo that declares them. Uncommitted changes mean the pass tested other code.
-if [ -f "$top/loopgate.json" ]; then
-	if [ -n "$(git -C "$top" status --porcelain)" ]; then
-		echo "Blocked: $repo has uncommitted changes, so the gates would not test what is pushed. Commit, run ci-gate-runner from '$top', then push again." >&2
+# Checks the gate and review records of the repo at $1; exits 2 when the push must not go through.
+check_repo() {
+	head=$(git -C "$1" rev-parse HEAD 2>/dev/null) || {
+		echo "Blocked: cannot read HEAD in '$1', so the gate and review records cannot be checked." >&2
+		exit 2
+	}
+	top=$(git -C "$1" rev-parse --show-toplevel)
+	short=$(printf '%s' "$head" | cut -c1-7)
+	# The name the tools record under: the origin remote's last path segment, else the directory.
+	repo=$(git -C "$1" remote get-url origin 2>/dev/null | sed -E 's|/+$||; s|\.git$||; s|.*[/:]||')
+	repo=${repo:-$(basename "$top")}
+
+	# 1. Gates: only for a repo that declares them. Uncommitted changes mean the pass tested other code.
+	if [ -f "$top/loopgate.json" ]; then
+		if [ -n "$(git -C "$top" status --porcelain)" ]; then
+			echo "Blocked: $repo has uncommitted changes, so the gates would not test what is pushed. Commit, run ci-gate-runner from '$top', then push again." >&2
+			exit 2
+		fi
+		passed=""
+		if [ -f "$state/ci-gate-pass.json" ]; then
+			passed=$(jq -r --arg top "$top" '.[$top].head // empty' "$state/ci-gate-pass.json" 2>/dev/null)
+		fi
+		if [ "$passed" != "$head" ]; then
+			echo "Blocked: the gates have not passed for $repo at $short. Run ci-gate-runner from '$top' (it can take minutes: run it in the background and wait), then push again." >&2
+			exit 2
+		fi
+	fi
+
+	# 2. Review: the latest record for this repo at this HEAD decides.
+	log="$state/pre-push-review-log.jsonl"
+	verdict=""
+	if [ -f "$log" ]; then
+		verdict=$(jq -rc --arg repo "$repo" --arg head "$short" \
+			'select(.repo == $repo and (.head[0:7]) == $head) | .high' "$log" 2>/dev/null | tail -n 1)
+	fi
+	if [ -z "$verdict" ]; then
+		echo "Blocked: no pre-push review is recorded for $repo at $short. Run the pre-push-review skill (prepare, review, handle the findings, log), then push again." >&2
 		exit 2
 	fi
-	passed=""
-	if [ -f "$state/ci-gate-pass.json" ]; then
-		passed=$(jq -r --arg top "$top" '.[$top].head // empty' "$state/ci-gate-pass.json" 2>/dev/null)
-	fi
-	if [ "$passed" != "$head" ]; then
-		echo "Blocked: the gates have not passed for $repo at $short. Run ci-gate-runner from '$top' (it can take minutes: run it in the background and wait), then push again." >&2
+	if [ "$verdict" != "0" ]; then
+		echo "Blocked: the latest pre-push review of $repo at $short recorded $verdict high finding(s). Fix them, commit, run the gates and the review again; or ask the owner to override." >&2
 		exit 2
 	fi
-fi
+}
 
-# 2. Review: the latest record for this repo at this HEAD decides.
-log="$state/pre-push-review-log.jsonl"
-verdict=""
-if [ -f "$log" ]; then
-	verdict=$(jq -rc --arg repo "$repo" --arg head "$short" \
-		'select(.repo == $repo and (.head[0:7]) == $head) | .high' "$log" 2>/dev/null | tail -n 1)
-fi
+# A path as given in the command, made absolute against the directory it is relative to.
+resolve() {
+	case "$1" in
+	/*) printf '%s' "$1" ;;
+	*) printf '%s/%s' "$2" "$1" ;;
+	esac
+}
 
-if [ -z "$verdict" ]; then
-	echo "Blocked: no pre-push review is recorded for $repo at $short. Run the pre-push-review skill (prepare, review, handle the findings, log), then push again." >&2
+# Fail closed: split the command into segments at ; & | ( ) and backticks (after joining backslash
+# line continuations), and treat every segment that runs `git [global options] push` as a push.
+# Only the options git accepts before a subcommand may sit between `git` and `push`, so a commit
+# message that mentions pushing is not a push.
+# shellcheck disable=SC2020 # six separators map to six newlines on purpose
+segments=$(printf '%s\n' "$command" |
+	awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' |
+	tr ';&|()`' '\n\n\n\n\n\n')
+opt="(-C[[:space:]]+(\"[^\"]*\"|${sq}[^${sq}]*${sq}|[^[:space:]]+)|-c[[:space:]]+[^[:space:]]+|--(git-dir|work-tree|namespace|exec-path|super-prefix)[[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?|-[pP])"
+push_re="(^|[[:space:]\"${sq}])git([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
+cd_re="^[[:space:]]*cd[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+))"
+dir_re="s/.*-C[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+)).*/\\2\\3\\4/p"
+
+cur=${cwd:-.}
+targets=""
+while IFS= read -r seg; do
+	# `cd` moves where the following segments run.
+	if printf '%s\n' "$seg" | grep -Eq "$cd_re"; then
+		to=$(printf '%s\n' "$seg" | sed -nE "s/${cd_re}.*/\\2\\3\\4/p")
+		cur=$(resolve "$to" "$cur")
+		continue
+	fi
+	printf '%s\n' "$seg" | grep -Eq "$push_re" || continue
+	# A segment that only prints or searches for the text is not a push.
+	printf '%s\n' "$seg" | grep -Eq '^[[:space:]]*(echo|printf|grep|rg|cat)[[:space:]]' && continue
+	# Nothing is sent by a dry run; look only after `push`, and not at the value of -o.
+	rest=$(printf '%s\n' "$seg" | awk -v re="$push_re" 'match($0, re) { print substr($0, RSTART + RLENGTH) }' |
+		sed -E 's/(-o|--push-option)[[:space:]]+[^[:space:]]+//g')
+	printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)' && continue
+	dir=$(printf '%s\n' "$seg" | sed -nE "$dir_re")
+	targets="$targets
+$(resolve "${dir:-.}" "$cur")"
+done <<EOF
+$segments
+EOF
+[ -n "$targets" ] || exit 0
+
+# Where a push goes is not knowable from these, so refuse rather than guess.
+if printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|[({]'; then
+	echo "Blocked: this command pushes through a subshell, group, pushd or GIT_DIR, so the repo being pushed cannot be told. Run the push on its own, with -C <dir> if needed." >&2
 	exit 2
 fi
-if [ "$verdict" != "0" ]; then
-	echo "Blocked: the latest pre-push review of $repo at $short recorded $verdict high finding(s). Fix them, commit, run the gates and the review again; or ask the owner to override." >&2
-	exit 2
-fi
+
+# Every distinct target must pass.
+done_dirs=""
+while IFS= read -r target; do
+	[ -n "$target" ] || continue
+	case "
+$done_dirs
+" in *"
+$target
+"*) continue ;; esac
+	done_dirs="$done_dirs
+$target"
+	check_repo "$target"
+done <<EOF
+$targets
+EOF
 exit 0
