@@ -82,14 +82,17 @@ resolve() {
 segments=$(printf '%s\n' "$command" |
 	awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' |
 	tr ';&|()`' '\n\n\n\n\n\n')
-val="(\"[^\"]*\"|${sq}[^${sq}]*${sq}|[^[:space:]]+)"
-opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|exec-path|super-prefix)[[:space:]]+${val}|--[a-z-]+(=${val})?|-[pP])"
+# A shell word: plain characters, backslash escapes and quoted runs in any mix (a="b c", with\ space).
+val="(([^[:space:]\"${sq}\\\\]|\\\\.|\"[^\"]*\"|${sq}[^${sq}]*${sq})+)"
+opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|exec-path|super-prefix|attr-source|config-env)[[:space:]]+${val}|--[a-z-]+(=${val})?|-[pP])"
 # `git` may follow any character but a word character, a dot or a hyphen (/usr/bin/git, \git, a quote),
 # and may itself be quoted.
 push_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
-# `cd`, optionally after the words that open a branch or loop body; groups 5 to 7 hold the path.
-cd_re="^[[:space:]]*(((then|do|else|elif|if|while|until|!|command|builtin)[[:space:]]+)*)cd[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+))"
-dir_re="s/.*-C[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+)).*/\\2\\3\\4/p"
+# `cd`, optionally after the words that open a branch or loop body; group 4 holds the path.
+cd_re="^[[:space:]]*(((then|do|else|elif|if|while|until|!|command|builtin)[[:space:]]+)*)cd[[:space:]]+${val}"
+dir_re="s/.*-C[[:space:]]+${val}.*/\\1/p"
+# A path as the shell would read it: quotes and escapes removed.
+unquote() { sed -E "s/[\"${sq}\\\\]//g"; }
 
 cur=${cwd:-.}
 targets=""
@@ -97,7 +100,7 @@ ambiguous=""
 while IFS= read -r seg; do
 	# `cd` moves where the following segments run.
 	if printf '%s\n' "$seg" | grep -Eq "$cd_re"; then
-		to=$(printf '%s\n' "$seg" | sed -nE "s/${cd_re}.*/\\5\\6\\7/p")
+		to=$(printf '%s\n' "$seg" | sed -nE "s/${cd_re}.*/\\4/p" | unquote)
 		cur=$(resolve "$to" "$cur")
 		continue
 	fi
@@ -108,7 +111,7 @@ while IFS= read -r seg; do
 	rest=$(printf '%s\n' "$seg" | awk -v re="$push_re" 'match($0, re) { print substr($0, RSTART + RLENGTH) }' |
 		sed -E 's/(-o|--push-option)[[:space:]]+[^[:space:]]+//g')
 	printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)' && continue
-	dir=$(printf '%s\n' "$seg" | sed -nE "$dir_re")
+	dir=$(printf '%s\n' "$seg" | sed -nE "$dir_re" | unquote)
 	# Several -C options compose, each relative to the one before: not worth resolving.
 	[ "$(($(printf '%s\n' "$seg" | grep -o -e '-C[[:space:]]' | wc -l)))" -gt 1 ] && ambiguous=1
 	targets="$targets
@@ -118,18 +121,19 @@ $segments
 EOF
 [ -n "$targets" ] || exit 0
 
-# Where a push goes is not knowable from these, so refuse rather than guess: a directory the hook
-# cannot follow (pushd, GIT_DIR, --git-dir), or a cd inside a subshell or group, or mixed with
-# sh -c / eval, whose cd may or may not reach the push. A parenthesis elsewhere, such as a commit
-# title's scope or a $( ) argument, does not move the push.
+# Where a push goes is not knowable from these, so refuse rather than guess. Always: a directory the
+# hook cannot follow (pushd, popd, GIT_DIR, --git-dir, --work-tree, --chdir) or several -C. And a cd
+# in a command that also has a group, a substitution ($( ), backticks, ${ }), sh -c or eval, since
+# that cd may or may not reach the push. The check runs on one line, so a command over several lines
+# is no different from one line. A cd with plain `&&` or `;` around it is followed segment by segment.
+flat=$(printf '%s' "$command" | tr '\n' ' ')
+dir_word='(^|[[:space:];&|(`"'"'"'])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|--chdir'
 cd_word='(^|[[:space:];&|(`"'"'"'])cd[[:space:]]'
-cd_in_group='(^|[^$])[({]([^)}]*[[:space:];&|(])?cd[[:space:]]'
 if [ -n "$ambiguous" ] ||
-	printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree' ||
-	printf '%s\n' "$command" | grep -Eq "$cd_in_group" ||
-	{ printf '%s\n' "$command" | grep -Eq "$cd_word" &&
-		printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])((ba|z|da)?sh[[:space:]]+-c|eval)([[:space:]]|$)'; }; then
-	echo "Blocked: the repo this command pushes cannot be told (a subshell, group, sh -c or eval around a cd, pushd, GIT_DIR, --git-dir or several -C). Run the push on its own, with -C <dir> if needed." >&2
+	printf '%s\n' "$flat" | grep -Eq "$dir_word" ||
+	{ printf '%s\n' "$flat" | grep -Eq "$cd_word" &&
+		printf '%s\n' "$flat" | grep -Eq '[({`]|(^|[[:space:]])((ba|z|da)?sh[[:space:]]+-c|eval)([[:space:]]|$)'; }; then
+	echo "Blocked: the repo this command pushes cannot be told (a cd mixed with a group, substitution, sh -c or eval; pushd, GIT_DIR, --git-dir, --chdir or several -C). Run the push on its own, with -C <dir> if needed." >&2
 	exit 2
 fi
 

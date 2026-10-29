@@ -79,7 +79,12 @@ describe('pre-push-gate hook', () => {
 			'(cd /elsewhere && git push)',
 			'pushd /elsewhere && git push',
 			'GIT_DIR=/elsewhere/.git git push',
-			'git --git-dir=/elsewhere/.git push'
+			'git --git-dir=/elsewhere/.git push',
+			'true;pushd /elsewhere;git push',
+			'env --chdir=/elsewhere git push',
+			'x=$(cd /elsewhere && git rev-parse HEAD); git push',
+			'x=`cd /elsewhere && pwd`; git push',
+			'(\n  cd /elsewhere\n  git fetch\n)\ngit push'
 		]) {
 			const blocked = run(command, repo, state);
 			expect(blocked.code, command).toBe(2);
@@ -96,6 +101,9 @@ describe('pre-push-gate hook', () => {
 			'"git" push',
 			"'git' push",
 			"git -c 'core.sshCommand=ssh -i ~/.ssh/k' push",
+			'git -c core.sshCommand="ssh -i ~/.ssh/k" push',
+			'git -C /a/with\\ space push',
+			'git --attr-source HEAD push',
 			'git --namespace "a b" push'
 		]) {
 			expect(run(command, repo, state).code, command).toBe(2);
@@ -184,6 +192,8 @@ describe('pre-push-gate hook', () => {
 		writeFileSync(join(state, 'pre-push-review-log.jsonl'), review(head, 0));
 		expect(run(`git -C "${repo}" push`, tmpdir(), state).code).toBe(0);
 		expect(run(`git -C '${repo}' push`, tmpdir(), state).code).toBe(0);
+		expect(run(`git -C ${repo.replaceAll(' ', '\\ ')} push`, tmpdir(), state).code).toBe(0);
+		expect(run(`git -C ${repo.replaceAll(' ', '" "')} push`, tmpdir(), state).code).toBe(0);
 		expect(run(`cd "${repo}" && git push`, tmpdir(), state).code).toBe(0);
 	});
 
