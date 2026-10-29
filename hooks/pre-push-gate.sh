@@ -68,6 +68,8 @@ check_repo() {
 resolve() {
 	case "$1" in
 	/*) printf '%s' "$1" ;;
+	\~) printf '%s' "$HOME" ;;
+	\~/*) printf '%s/%s' "$HOME" "${1#\~/}" ;;
 	*) printf '%s/%s' "$2" "$1" ;;
 	esac
 }
@@ -80,17 +82,22 @@ resolve() {
 segments=$(printf '%s\n' "$command" |
 	awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' |
 	tr ';&|()`' '\n\n\n\n\n\n')
-opt="(-C[[:space:]]+(\"[^\"]*\"|${sq}[^${sq}]*${sq}|[^[:space:]]+)|-c[[:space:]]+[^[:space:]]+|--(git-dir|work-tree|namespace|exec-path|super-prefix)[[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?|-[pP])"
-push_re="(^|[[:space:]\"${sq}])git([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
-cd_re="^[[:space:]]*cd[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+))"
+val="(\"[^\"]*\"|${sq}[^${sq}]*${sq}|[^[:space:]]+)"
+opt="(-C[[:space:]]+${val}|-c[[:space:]]+${val}|--(git-dir|work-tree|namespace|exec-path|super-prefix)[[:space:]]+${val}|--[a-z-]+(=${val})?|-[pP])"
+# `git` may follow any character but a word character, a dot or a hyphen (/usr/bin/git, \git, a quote),
+# and may itself be quoted.
+push_re="(^|[^[:alnum:]_.-])git[\"${sq}]?([[:space:]]+${opt})*[[:space:]]+[\"${sq}]?push[\"${sq}]?([^[:alnum:]_-]|\$)"
+# `cd`, optionally after the words that open a branch or loop body; groups 5 to 7 hold the path.
+cd_re="^[[:space:]]*(((then|do|else|elif|if|while|until|!|command|builtin)[[:space:]]+)*)cd[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+))"
 dir_re="s/.*-C[[:space:]]+(\"([^\"]*)\"|${sq}([^${sq}]*)${sq}|([^[:space:]]+)).*/\\2\\3\\4/p"
 
 cur=${cwd:-.}
 targets=""
+ambiguous=""
 while IFS= read -r seg; do
 	# `cd` moves where the following segments run.
 	if printf '%s\n' "$seg" | grep -Eq "$cd_re"; then
-		to=$(printf '%s\n' "$seg" | sed -nE "s/${cd_re}.*/\\2\\3\\4/p")
+		to=$(printf '%s\n' "$seg" | sed -nE "s/${cd_re}.*/\\5\\6\\7/p")
 		cur=$(resolve "$to" "$cur")
 		continue
 	fi
@@ -102,6 +109,8 @@ while IFS= read -r seg; do
 		sed -E 's/(-o|--push-option)[[:space:]]+[^[:space:]]+//g')
 	printf '%s\n' "$rest" | grep -Eq '(^|[[:space:]])(--dry-run|-n)([[:space:]]|$)' && continue
 	dir=$(printf '%s\n' "$seg" | sed -nE "$dir_re")
+	# Several -C options compose, each relative to the one before: not worth resolving.
+	[ "$(($(printf '%s\n' "$seg" | grep -o -e '-C[[:space:]]' | wc -l)))" -gt 1 ] && ambiguous=1
 	targets="$targets
 $(resolve "${dir:-.}" "$cur")"
 done <<EOF
@@ -109,9 +118,18 @@ $segments
 EOF
 [ -n "$targets" ] || exit 0
 
-# Where a push goes is not knowable from these, so refuse rather than guess.
-if printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree|[({]'; then
-	echo "Blocked: this command pushes through a subshell, group, pushd or GIT_DIR, so the repo being pushed cannot be told. Run the push on its own, with -C <dir> if needed." >&2
+# Where a push goes is not knowable from these, so refuse rather than guess: a directory the hook
+# cannot follow (pushd, GIT_DIR, --git-dir), or a cd inside a subshell or group, or mixed with
+# sh -c / eval, whose cd may or may not reach the push. A parenthesis elsewhere, such as a commit
+# title's scope or a $( ) argument, does not move the push.
+cd_word='(^|[[:space:];&|(`"'"'"'])cd[[:space:]]'
+cd_in_group='(^|[^$])[({]([^)}]*[[:space:];&|(])?cd[[:space:]]'
+if [ -n "$ambiguous" ] ||
+	printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])(pushd|popd)([[:space:]]|$)|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree' ||
+	printf '%s\n' "$command" | grep -Eq "$cd_in_group" ||
+	{ printf '%s\n' "$command" | grep -Eq "$cd_word" &&
+		printf '%s\n' "$command" | grep -Eq '(^|[[:space:]])((ba|z|da)?sh[[:space:]]+-c|eval)([[:space:]]|$)'; }; then
+	echo "Blocked: the repo this command pushes cannot be told (a subshell, group, sh -c or eval around a cd, pushd, GIT_DIR, --git-dir or several -C). Run the push on its own, with -C <dir> if needed." >&2
 	exit 2
 fi
 
@@ -119,6 +137,13 @@ fi
 done_dirs=""
 while IFS= read -r target; do
 	[ -n "$target" ] || continue
+	# A variable or command substitution in the path is not expanded here.
+	case "$target" in
+	*'$'* | *'`'*)
+		echo "Blocked: the repo this command pushes cannot be told ('$target' has a variable or substitution in it). Use a literal path." >&2
+		exit 2
+		;;
+	esac
 	case "
 $done_dirs
 " in *"
