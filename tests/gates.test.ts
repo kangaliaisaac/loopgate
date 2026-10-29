@@ -126,7 +126,7 @@ function deps(
 
 describe('config', () => {
 	it('reads the database name from a URL', () => {
-		expect(databaseName('postgresql+psycopg://u:p@h:5432/app_test')).toBe('app_test');
+		expect(databaseName('postgres://u:p@h:5432/app_test')).toBe('app_test');
 		expect(databaseName('postgres://u@h/app?sslmode=x')).toBe('app');
 		expect(databaseName(undefined)).toBeUndefined();
 		expect(isTestDatabase('postgres://u@localhost/app_test')).toBe(true);
@@ -148,7 +148,7 @@ describe('config', () => {
 			expect(isTestDatabase(`postgres://u@localhost/app_test?x=1&${query}`)).toBe(false);
 			expect(isTestDatabase(`postgres://u@localhost/app_test?${query}#f`)).toBe(false);
 		}
-		expect(databaseHost('postgresql+psycopg://u:p@localhost:5432/x')).toBe('localhost');
+		expect(databaseHost('postgres://u:p@localhost:5432/x')).toBe('localhost');
 		expect(databaseHost('not a url')).toBeUndefined();
 		expect(databaseHost(undefined)).toBeUndefined();
 	});
@@ -361,7 +361,7 @@ describe('runGates', () => {
 
 	it('resolves a relative command and refuses database gates on a non-test database', () => {
 		const calls: string[] = [];
-		const url = 'postgresql+psycopg://u:p@localhost/app';
+		const url = 'postgres://u:p@localhost/app';
 		const bad = runGates(
 			'/w/example-service',
 			deps({ top: '/w/example-service', calls, config: SERVICE_CONFIG }, {}, { DATABASE_URL: url })
@@ -383,7 +383,7 @@ describe('runGates', () => {
 			deps(
 				{ top: '/w/example-service', config: SERVICE_CONFIG },
 				{},
-				{ DATABASE_URL: 'postgresql+psycopg://u:p@localhost/app_test' }
+				{ DATABASE_URL: 'postgres://u:p@localhost/app_test' }
 			)
 		);
 		expect(ok.exitCode).toBe(0);
@@ -415,7 +415,7 @@ describe('runGates', () => {
 
 	it('names what a fresh worktree is missing before running anything', () => {
 		const calls: string[] = [];
-		const ui = runGates(
+		const nodeRepo = runGates(
 			'/w/feat-x',
 			deps({
 				top: '/w/feat-x',
@@ -424,10 +424,10 @@ describe('runGates', () => {
 				missing: ['node_modules']
 			})
 		);
-		expect(ui).toMatchObject({ exitCode: 2, stdout: '' });
-		expect(ui.stderr).toMatch(/example-app at \/w\/feat-x has no node_modules: run `npm ci`/);
+		expect(nodeRepo).toMatchObject({ exitCode: 2, stdout: '' });
+		expect(nodeRepo.stderr).toMatch(/example-app at \/w\/feat-x has no node_modules: run `npm ci`/);
 		expect(calls.some((c) => c.includes('npm'))).toBe(false);
-		const worker = runGates(
+		const pythonRepo = runGates(
 			'/w/w2',
 			deps({
 				top: '/w/w2',
@@ -436,8 +436,8 @@ describe('runGates', () => {
 				config: SERVICE_CONFIG
 			})
 		);
-		expect(worker.stderr).toMatch(/no \.venv\/bin\/python: create the virtualenv/);
-		const core = runGates(
+		expect(pythonRepo.stderr).toMatch(/no \.venv\/bin\/python: create the virtualenv/);
+		const noEnvRepo = runGates(
 			'/w/example-lib',
 			deps({
 				top: '/w/example-lib',
@@ -445,7 +445,7 @@ describe('runGates', () => {
 				config: { gates: APP_CONFIG.gates }
 			})
 		);
-		expect(core.exitCode).toBe(0);
+		expect(noEnvRepo.exitCode).toBe(0);
 	});
 
 	it('stops a gate that hangs and shows what it printed', () => {

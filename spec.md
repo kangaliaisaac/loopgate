@@ -1,6 +1,6 @@
 # `loopgate`: spec
 
-Status: draft. Written from the sweep of the source tool; the config contract below needs the owner's approval before card 02.
+Status: accepted.
 
 ## Shape
 

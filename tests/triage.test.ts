@@ -33,7 +33,7 @@ function fakeGh(routes: Routes, failing: string[] = [], timeout: string[] = []):
 	return { exec, calls };
 }
 
-const SIBLINGS = ['example-api', 'example-worker', 'example-web', 'example-docs'];
+const SIBLINGS = ['example-api', 'example-lib', 'example-site', 'example-docs'];
 const deps = (fake: Fake): CollectDeps => ({
 	exec: fake.exec,
 	env: {},
@@ -84,7 +84,7 @@ const routes = (extra: Routes = {}): Routes => ({
 			path: 'src/a.rs',
 			start_line: 12,
 			title: 'Bug',
-			message: 'Mismatch with example-worker schema, example-api is fine, see example-docs'
+			message: 'Mismatch with example-lib schema, example-api is fine, see example-docs'
 		},
 		{ path: 'src/b.rs', start_line: 3, title: null, message: 'Off by one' }
 	],
@@ -119,7 +119,7 @@ const routes = (extra: Routes = {}): Routes => ({
 		},
 		{ id: 22, commit_id: HEAD, user: { login: 'bot[bot]', type: 'Bot' }, body: 'General' }
 	],
-	'repos/example-org/example-worker/commits/main': 'w0rkersha\n',
+	'repos/example-org/example-lib/commits/main': 'l1bsha\n',
 	'repos/example-org/example-docs/commits/main': 'd0cssha\n',
 	...extra
 });
@@ -192,8 +192,8 @@ describe('claim detection', () => {
 
 	it('lists sibling repos other than the current one', () => {
 		expect(
-			siblingsMentioned('example-api and example-worker, example-workers', 'example-api', SIBLINGS)
-		).toEqual(['example-worker']);
+			siblingsMentioned('example-api and example-lib, example-libs', 'example-api', SIBLINGS)
+		).toEqual(['example-lib']);
 		expect(siblingsMentioned('nothing', 'example-api', SIBLINGS)).toEqual([]);
 		expect(siblingsMentioned('a.b and axb', 'x', ['a.b'])).toEqual(['a.b']);
 		expect(siblingsMentioned('axb', 'x', ['a.b'])).toEqual([]);
@@ -214,7 +214,7 @@ describe('collect', () => {
 		expect(got.repo).toBe('example-org/example-api');
 		expect(got.headSha).toBe('abcdef1234567');
 		expect(got.warnings).toEqual([STALE_WARNING]);
-		expect(got.siblingShas).toEqual({ 'example-worker': 'w0rkersha', 'example-docs': 'd0cssha' });
+		expect(got.siblingShas).toEqual({ 'example-lib': 'l1bsha', 'example-docs': 'd0cssha' });
 		expect(got.findings.map((f) => f.id)).toEqual([
 			'check-2',
 			'annotation-2-0',
@@ -236,9 +236,9 @@ describe('collect', () => {
 		expect(got.findings[1]).toMatchObject({
 			path: 'src/a.rs',
 			line: 12,
-			body: 'Bug\nMismatch with example-worker schema, example-api is fine, see example-docs',
+			body: 'Bug\nMismatch with example-lib schema, example-api is fine, see example-docs',
 			unverifiedClaim: false,
-			crossRepo: ['example-worker', 'example-docs']
+			crossRepo: ['example-lib', 'example-docs']
 		});
 		expect(got.findings[2]).toMatchObject({ body: 'Off by one' });
 		expect(got.findings[5]).toMatchObject({ author: 'bot[bot]', path: 'x.rs', line: 4 });
@@ -301,17 +301,17 @@ describe('collect', () => {
 					path: 'p',
 					start_line: 1,
 					title: 't',
-					message: 'see example-web and example-worker-foo'
+					message: 'see example-site and example-lib-foo'
 				}))
 			}),
-			['repos/example-org/example-web/commits/main']
+			['repos/example-org/example-site/commits/main']
 		);
 		const got = collect(deps(fake), opts);
 		expect(got.findings.filter((f) => f.source === 'review')).toHaveLength(1000);
-		expect(got.siblingShas).toEqual({ 'example-web': null });
+		expect(got.siblingShas).toEqual({ 'example-site': null });
 		expect(got.warnings).toEqual([
 			'reviews: stopped after 1000 items, so there may be more.',
-			'Could not read origin/main of example-web; do not state claims about it as fact.'
+			'Could not read origin/main of example-site; do not state claims about it as fact.'
 		]);
 	});
 
@@ -365,7 +365,7 @@ describe('main', () => {
 			findings: 12,
 			stale: 2,
 			unverifiedClaims: 1,
-			siblingShas: { 'example-worker': 'w0rkersha' }
+			siblingShas: { 'example-lib': 'l1bsha' }
 		});
 	});
 
