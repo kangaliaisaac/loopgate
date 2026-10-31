@@ -350,7 +350,10 @@ describe('runGates', () => {
 	it('refuses a dirty tree, a non-repo, and says when a repo has no gates', () => {
 		expect(runGates('/w/example-app', deps({ status: ' M a' })).stderr).toMatch(/uncommitted/);
 		expect(runGates('/w/example-app', deps({ status: ' M a' })).exitCode).toBe(2);
-		expect(runGates('/x', deps({ notRepo: true }))).toMatchObject({ exitCode: 2 });
+		expect(runGates('/x', deps({ notRepo: true }))).toMatchObject({
+			exitCode: 2,
+			stderr: expect.stringMatching(/not a git repo with a commit/)
+		});
 		const none = runGates('/w/example-docs', deps({ top: '/w/example-docs', config: null }));
 		expect(none).toMatchObject({ exitCode: 0 });
 		expect(none.stdout).toMatch(/no loopgate\.json, so it has no gates/);
