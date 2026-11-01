@@ -55,7 +55,24 @@ cd loopgate && npm ci
 }
 ```
 
-The keys, and the optional `testDatabaseEnv`, `siblingRepos` and `sensitivePaths`, are in [spec.md](spec.md). A Python repo uses `"command": "./.venv/bin/python", "args": ["-m", "pytest", "-q"]`, or `uv run`.
+The keys, and the optional `testDatabaseEnv`, `siblingRepos` and `sensitivePaths`, are in [spec.md](spec.md). A Python repo gates like this (with `uv run --no-sync` so the gates work without the venv on `PATH`):
+
+```json
+{
+	"gates": [
+		{ "name": "ruff", "command": "uv", "args": ["run", "--no-sync", "ruff", "check", "."] },
+		{
+			"name": "format",
+			"command": "uv",
+			"args": ["run", "--no-sync", "ruff", "format", "--check", "."]
+		},
+		{ "name": "mypy", "command": "uv", "args": ["run", "--no-sync", "mypy", "src"] },
+		{ "name": "test", "command": "uv", "args": ["run", "--no-sync", "pytest", "-q"] }
+	]
+}
+```
+
+The runner records a pass per commit, so the repo needs at least one commit first.
 
 **2. Run the tools** from the repo being gated (`<loopgate>` is this checkout):
 
@@ -89,7 +106,7 @@ node <loopgate>/bin/review-triage.ts fetch --pr 12 --repo owner/name
 
 The hook only covers pushes Claude makes. A push from your own terminal skips it, so make CI the backstop.
 
-**5. Turn on the remote review.** Copy [docs/review-caller.example.yml](docs/review-caller.example.yml) into the repo as `.github/workflows/review.yml`, set `<ref>` to a loopgate tag, and add a `CLAUDE_CODE_OAUTH_TOKEN` repository secret and the Claude Code GitHub App. It reviews same-repository, non-draft pull requests with read-only tools.
+**5. Turn on the remote review.** Copy [docs/review-caller.example.yml](docs/review-caller.example.yml) into the repo as `.github/workflows/review.yml`, keep or bump the `@v0.1.0` tag, and add a `CLAUDE_CODE_OAUTH_TOKEN` repository secret and the Claude Code GitHub App. It reviews same-repository, non-draft pull requests with read-only tools.
 
 ## State
 
