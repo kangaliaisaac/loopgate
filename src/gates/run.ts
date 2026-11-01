@@ -52,7 +52,12 @@ export function runGates(dir: string, deps: RunDeps): GateResult {
 
 function runGatesIn(dir: string, deps: RunDeps): GateResult {
 	const repo = repoState(dir, deps.exec);
-	if (repo === undefined) return { exitCode: 2, stdout: '', stderr: `${dir} is not a git repo.\n` };
+	if (repo === undefined)
+		return {
+			exitCode: 2,
+			stdout: '',
+			stderr: `${dir} is not a git repo with a commit; commit once so a pass can be recorded.\n`
+		};
 	const loaded = configOrMessage(repo.top, deps.readFile);
 	if (typeof loaded === 'string') return { exitCode: 2, stdout: '', stderr: `${loaded}\n` };
 	if (loaded === undefined) {
