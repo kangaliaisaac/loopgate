@@ -19,7 +19,11 @@ Nothing else is public. `src/index.ts` is the whole surface and `tests/index.tes
 Pin a tag, so a change in loopgate never reaches you unannounced:
 
 ```json
-{ "dependencies": { "loopgate": "github:kangaliaisaac/loopgate#v0.1.0" } }
+{ 
+    "dependencies": { 
+        "loopgate": "github:kangaliaisaac/loopgate#v0.1.0" 
+    } 
+}
 ```
 
 The `prepare` script builds `dist/` when npm installs from git. The exports follow semantic versioning from 1.0; before that, a minor version may change them.
