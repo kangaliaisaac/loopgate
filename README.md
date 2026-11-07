@@ -132,7 +132,7 @@ The design rests on public work; the tools are an application of it, not a copy.
 
 - Anthropic, [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents): keep the human in the loop at checkpoints, stop on explicit conditions, and test agents in a sandbox before trusting them.
 - Anthropic, [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents): one change per session, a commit at the end of each, and end-to-end verification before something counts as done. This is the loop loopgate enforces.
-- Anthropic, [Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps): a separate, deliberately skeptical evaluator beats an agent grading its own work. The reviewer agent is that evaluator.
+- Anthropic, [Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps): a separate, deliberately skeptical evaluator beats an agent grading its own work. The pre-push reviewer plays that role.
 - Claude Code, [Hooks reference](https://code.claude.com/docs/en/hooks): the `PreToolUse` hook and its exit-code semantics, which the push hook is built on.
 
 ## Licence
