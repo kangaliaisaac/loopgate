@@ -2,6 +2,18 @@
 
 Status: accepted.
 
+- [`loopgate`: spec](#loopgate-spec)
+  - [Shape](#shape)
+  - [The pieces](#the-pieces)
+    - [The three tools](#the-three-tools)
+  - [Config contract: `loopgate.json`](#config-contract-loopgatejson)
+  - [Push hook](#push-hook)
+  - [Agents and skills](#agents-and-skills)
+  - [Library](#library)
+  - [Remote review](#remote-review)
+  - [Gates for `loopgate` itself](#gates-for-loopgate-itself)
+  - [Not in this repo](#not-in-this-repo)
+
 ## Shape
 
 TypeScript on Node 24+, run directly (`node bin/<tool>.ts`) with no build step. Functional core with thin I/O edges: each tool is a pure module in `src/` plus a small entry in `bin/` that passes in the process, clock, filesystem and `git`.
