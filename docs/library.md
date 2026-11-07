@@ -1,6 +1,6 @@
 # Library
 
-loopgate's tools run straight from TypeScript source (`node bin/<tool>.ts`). A package that depends on loopgate cannot do that: Node does not strip types from files under `node_modules`. So the process and git helpers other tools need are also built to `dist/` (JavaScript plus type declarations) and exported from the package root.
+`loopgate`'s tools run straight from TypeScript source (`node bin/<tool>.ts`). A package that depends on `loopgate` cannot do that: Node does not strip types from files under `node_modules`. So the process and git helpers other tools need are also built to `dist/` (JavaScript plus type declarations) and exported from the package root.
 
 ```ts
 import { gatesBlock, repoState, spawnExec, stdoutOf, withBudget } from 'loopgate';

@@ -1,5 +1,15 @@
 # `loopgate`
 
+- [`loopgate`](#loopgate)
+	- [What is in it](#what-is-in-it)
+	- [Use it](#use-it)
+	- [How not to use it](#how-not-to-use-it)
+	- [State](#state)
+	- [Design](#design)
+	- [References](#references)
+	- [Licence](#licence)
+
+
 Gates and reviews for AI-assisted changes. A coding agent can produce a plausible diff faster than you can read it. `loopgate` makes the checks happen before the pull request instead of in it.
 
 The loop it enforces:

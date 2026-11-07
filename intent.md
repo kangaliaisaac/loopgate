@@ -1,5 +1,13 @@
 # `loopgate`: intent
 
+- [`loopgate`: intent](#loopgate-intent)
+  - [What it is](#what-it-is)
+  - [The problem](#the-problem)
+  - [What it does](#what-it-does)
+  - [Who it is for](#who-it-is-for)
+  - [Out of scope](#out-of-scope)
+
+
 ## What it is
 
 `loopgate` is a small toolkit that keeps AI-assisted changes honest before they reach a pull request. It is three command-line tools, two Claude Code agents with their skills, one push hook, one reusable GitHub workflow and a small library of the process and git helpers the tools share. It works on any repo, in any language, because it runs the repo's own gate commands instead of knowing them.
