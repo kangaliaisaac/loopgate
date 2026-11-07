@@ -3,17 +3,16 @@
 Status: accepted.
 
 - [`loopgate`: spec](#loopgate-spec)
-	- [Shape](#shape)
-	- [The pieces](#the-pieces)
-		- [The three tools](#the-three-tools)
-	- [Config contract: `loopgate.json`](#config-contract-loopgatejson)
-	- [Push hook](#push-hook)
-	- [Agents and skills](#agents-and-skills)
-	- [Library](#library)
-	- [Remote review](#remote-review)
-	- [Gates for `loopgate` itself](#gates-for-loopgate-itself)
-	- [Not in this repo](#not-in-this-repo)
-
+  - [Shape](#shape)
+  - [The pieces](#the-pieces)
+    - [The three tools](#the-three-tools)
+  - [Config contract: `loopgate.json`](#config-contract-loopgatejson)
+  - [Push hook](#push-hook)
+  - [Agents and skills](#agents-and-skills)
+  - [Library](#library)
+  - [Remote review](#remote-review)
+  - [Gates for `loopgate` itself](#gates-for-loopgate-itself)
+  - [Not in this repo](#not-in-this-repo)
 
 ## Shape
 
