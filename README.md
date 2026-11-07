@@ -5,7 +5,7 @@ Gates and reviews for AI-assisted changes. A coding agent can produce a plausibl
 The loop it enforces:
 
 ```
-change → gates → local review → fix until green → push → remote review → the owner reviews and mergees
+change → gates → local review → fix until green → push → remote review → the owner reviews and merges
 ```
 
 `loopgate` never merges, approves or labels a pull request. Everything it adds is read-only advice or a refusal; the owner decides.
@@ -34,7 +34,7 @@ cd loopgate && npm ci
 
 **1. Describe the gates.**
 
-Put a `loopgate.json` at the root of the repo to gate (one per repo, committed there). This is loopgate's own:
+Put a `loopgate.json` at the root of the repo to gate (one per repo, committed there). This is `loopgate`'s own:
 
 ```json
 {
@@ -170,14 +170,14 @@ Records (gate passes, the review log, diffs, findings) are kept under `LOOPGATE_
 
 ## Design
 
-[intent.md](intent.md) says what loopgate is for and what it will not do. [spec.md](spec.md) is the contract. The decisions are in [docs/adr](docs/adr).
+[intent.md](intent.md) says what `loopgate` is for and what it will not do. [spec.md](spec.md) is the contract. The decisions are in [docs/adr](docs/adr).
 
 ## References
 
 The design rests on public work; the tools are an application of it, not a copy.
 
 - Anthropic, [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents): keep the human in the loop at checkpoints, stop on explicit conditions, and test agents in a sandbox before trusting them.
-- Anthropic, [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents): one change per session, a commit at the end of each, and end-to-end verification before something counts as done. This is the loop loopgate enforces.
+- Anthropic, [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents): one change per session, a commit at the end of each, and end-to-end verification before something counts as done. This is the loop `loopgate` enforces.
 - Anthropic, [Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps): a separate, deliberately skeptical evaluator beats an agent grading its own work. The pre-push reviewer plays that role.
 - Claude Code, [Hooks reference](https://code.claude.com/docs/en/hooks): the `PreToolUse` hook and its exit-code semantics, which the push hook is built on.
 
