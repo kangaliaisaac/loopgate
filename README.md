@@ -128,7 +128,7 @@ cd loopgate && npm ci
 | ----------------------------------- | ------------------------------------- | --------- |
 | `loopgate.json`                     | repo root                             | yes       |
 | the push hook entry                 | repo `.claude/settings.local.json`    | no        |
-| `.github/workflows/review.yml`      | repo, a ten-line caller               | yes       |
+| `.github/workflows/review.yml`      | repo, a short caller                  | yes       |
 | agents and skills (copy or symlink) | `~/.claude/` or the repo's `.claude/` | either    |
 
 **1. Describe the gates.**
@@ -308,7 +308,7 @@ It prints a JSON summary (`path` to the findings file, `headSha`, counts of `fin
   - `prepare` runs `git fetch` first. If that fails or times out it only warns that `origin/main` may be stale and the diff may include already-merged work; it does not stop. Every git call has a one-minute limit and credential prompts are off, so it fails instead of hanging.
   - The reviewer agent needs the model service, so no review can be recorded offline, and the hook will keep blocking until one is.
   - `review-triage` and the remote review need GitHub.
-- **A slow or missing `git` blocks rather than allows.** If `git` cannot be run or times out, the runner exits `2` and runs nothing, and the hook blocks.
+- **A missing `git` blocks rather than allows.** If `git` cannot be run, the runner exits `2` and runs nothing, and the hook blocks. A `git` that hangs is limited only in `prepare` (one minute); the runner and the hook set no time limit of their own.
 - **A hung gate is stopped** after 20 minutes (or the gate's `timeoutMs`), with its last output.
 
 ## State
