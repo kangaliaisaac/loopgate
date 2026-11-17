@@ -33,7 +33,7 @@ Advice such as "run the tests before you push" gets skipped under time pressure,
 
 ## Where it fits
 
-The loop it enforces, from an edit to a merge. The solid boxes are `loopgate`; the dashed box is whatever fast checks your repo already runs on edit and commit, which `loopgate` does not provide.
+The loop it enforces, from an edit to a merge. The shaded boxes are `loopgate`; the dashed box is whatever fast checks your repo already runs on edit and commit, which `loopgate` does not provide, and the plain boxes are git, GitHub and your own CI.
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,7 @@ flowchart LR
     push --> hook{"Push hook<br/>reads both records"}
     hook -->|"a record is missing or stale: blocked"| gates
     hook -->|"both match HEAD: allowed"| pr["Pull request"]
-    pr --> ci["CI: the same gates, again"]
+    pr --> ci["Your CI: the same commands,<br/>kept in step by hand"]
     pr --> remote["Remote review workflow<br/>read-only, comments only"]
     remote --> triage["review-triage<br/>sorts the findings"]
     triage -->|"real defects: fix, commit"| commit
@@ -55,7 +55,9 @@ flowchart LR
     triage --> merge
 
     classDef outside stroke-dasharray: 5 5
+    classDef lg fill:#dbeafe,stroke:#1d4ed8,color:#111827
     class own outside
+    class gates,review,hook,remote,triage lg
 ```
 
 Two records connect the steps. `ci-gate-runner` writes a gate pass for the work tree and its `HEAD`; the review step writes a one-line review record for the repo and its `HEAD`. The push hook only reads them. A new commit changes `HEAD`, which makes both records stale, so every fix goes back through the gates and the review.
@@ -87,8 +89,8 @@ flowchart TD
     jq -->|yes| scan["Split the command into segments<br/>and find the repo each push targets"]
     scan --> found{"A real push<br/>that sends something?"}
     found -->|"no, or only --dry-run"| allow
-    found -->|"cannot tell where it goes<br/>(pushd, GIT_DIR, sh -c with cd,<br/>several pushes, open quote)"| block
-    found -->|"an earlier command in the same line<br/>moves HEAD (commit, checkout, rebase ...)"| block
+    found -->|"cannot tell where it goes<br/>(pushd, GIT_DIR, sh -c with cd,<br/>several pushes in one quoted script,<br/>several -C, open quote)"| block
+    found -->|"an earlier command in the same command<br/>moves HEAD (commit, checkout, rebase ...)"| block
     found -->|yes| head{"Can HEAD be read<br/>in the target repo?"}
     head -->|no| block
     head -->|yes| hasconf{"Does the repo have<br/>a loopgate.json?"}
@@ -107,7 +109,7 @@ What each answer is read from, as the code does it:
 
 - **The gate pass** is `ci-gate-pass.json` in the state directory: one entry per work-tree path holding the `HEAD` the gates passed at. It is checked only in a repo that has a `loopgate.json`, and an uncommitted change blocks, because the pass tested other code.
 - **The review record** is `pre-push-review-log.jsonl`, one line per review. The hook takes the latest line whose `repo` equals the repo's name (the last path segment of the `origin` remote, else the directory name) and whose `head` starts with the first seven characters of `HEAD`. Its `high` count must be `0`. No such line blocks.
-- **What blocks:** a missing or stale record, a `high` count above zero, a dirty tree (in a gated repo), no `jq`, an unreadable `HEAD`, a push whose target repo the hook cannot work out, and a push on the same line as a command that moves `HEAD`.
+- **What blocks:** a missing or stale record, a `high` count above zero, a dirty tree (in a gated repo), no `jq`, an unreadable `HEAD`, a push whose target repo the hook cannot work out, and a push in the same command as one that moves `HEAD`.
 - **What allows:** both records match, or the command is not a push (or is `--dry-run` or `-n`).
 - **What an override means.** The hook has no override switch. When it blocks on a `high` finding, its message says to fix it or "ask the owner to override". An override is the owner telling the assistant to record the review with `--high 0`; the skill says to do that only with the owner's yes and to say so in the pull request description. The record is then as good as the assistant's word, which is why CI and the owner's own read of the diff still come after it.
 
@@ -129,6 +131,7 @@ cd loopgate && npm ci
 | `loopgate.json`                     | repo root                             | yes       |
 | the push hook entry                 | repo `.claude/settings.local.json`    | no        |
 | `.github/workflows/review.yml`      | repo, a short caller                  | yes       |
+| your CI workflow                    | repo `.github/workflows/`             | yes       |
 | agents and skills (copy or symlink) | `~/.claude/` or the repo's `.claude/` | either    |
 
 **1. Describe the gates.**
@@ -210,7 +213,7 @@ Copy [docs/review-caller.example.yml](docs/review-caller.example.yml) into the r
 
 **6. Make CI the backstop.**
 
-In GitHub, require the `review` check and your gates on the branch. The hook cannot do that for you (see the next sections).
+In GitHub, require the `review / review` check (the caller's job, then the reusable workflow's) and your gates on the branch. The hook cannot do that for you (see the next sections).
 
 ## A worked example
 
@@ -232,7 +235,7 @@ All gates passed for my-agent at b80e314.
 Next: run the pre-push review (skill `pre-push-review`), then push.
 ```
 
-A failing gate stops the run, prints `FAILED <name> (exit <code>, <seconds>s):` and the last 60 lines of its output, and exits `1`. Exit `2` means the runner could not run (dirty tree, not a repo, invalid config).
+A failing gate stops the run, prints `FAILED <name> (exit <code>, <seconds>s):` and the last 60 lines of its output, and exits `1`. Exit `2` means the runner could not run (for example a dirty tree, not a repo, a repo with no commit, a missing `environment` path, no `git`, invalid config).
 
 **It tries again.** The gates pass, but no review is recorded:
 
@@ -275,7 +278,7 @@ Blocked: the latest pre-push review of my-agent at b80e314 recorded 1 high findi
 
 The assistant checks the finding itself (the reviewer can be wrong), fixes it in a new commit, and starts again: new `HEAD`, so new gates and a new review. When the review of the new commit finds no `high`, `log` records `--high 0` and the hook prints nothing and exits `0`: the push goes through.
 
-**On the pull request**, CI repeats the gates and the review workflow comments on the diff. When the `review` check finishes with findings, the assistant fetches them and has them sorted:
+**On the pull request**, your CI runs its own copy of the gates and the review workflow comments on the diff. When the `review / review` check finishes with findings, the assistant fetches them and has them sorted:
 
 ```
 $ node <loopgate>/bin/review-triage.ts fetch --pr 12 --repo acme/my-agent
@@ -286,8 +289,8 @@ It prints a JSON summary (`path` to the findings file, `headSha`, counts of `fin
 ## What it is not, and how not to use it
 
 - **It is not a security boundary.** The hook reads the command Claude is about to run and refuses a push it can tell is unsafe. It is a scanner with known limits: a conditional `cd`, an alias, `echo '...' | sh`, and a `git`, `pushd` or `GIT_DIR` form hidden inside a quoted script can slip past it, and a command that merely mentions a push in its text can be refused. Treat it as a guardrail for an agent that is trying to follow the rules, not a defence against one that is not.
-- **It is not a CI replacement.** It runs the same gate commands earlier and on one machine, so a failure costs seconds instead of a CI round. CI still has to run them, because a push that did not go through the hook (below) never had them checked.
-- **It only covers pushes Claude makes.** A push from your own terminal, a script or another tool skips the hook. The hook also judges the checked-out `HEAD`, not the branch named in the command. Make CI the backstop: require the `review` check and the gates on the branch.
+- **It is not a CI replacement, and it does not write or check your CI.** It runs the gate commands earlier and on one machine, so a failure costs seconds instead of a CI round. CI still has to run them, and keeping its commands in step with `loopgate.json` is the repo's job: nothing makes CI read `loopgate.json`. `loopgate`'s own CI repeats its gates by hand and already differs a little (it shellchecks every `*.sh` file where the gate checks one, and runs `gitleaks`, which is not a local gate). because a push that did not go through the hook (below) never had them checked.
+- **It only covers pushes Claude makes.** A push from your own terminal, a script or another tool skips the hook. The hook also judges the checked-out `HEAD`, not the branch named in the command. Make CI the backstop: require the `review / review` check and the gates on the branch.
 - **The review record is self-reported.** The assistant records the counts the reviewer printed; nothing proves the review ran, and nothing stops a false `--high 0`. The log shows the pattern over time, and the remote review and the owner are the backstop.
 - **It is not a substitute for a human reading the diff.** The reviewer is a model: it can miss a defect and it can report one that is not there. It sees the diff and the repo it runs in, and is told to say what it could not check. The skill has the assistant verify every `high` and `medium` finding before acting. A clean review is not a reason to skip reading the change.
 - **It cannot catch what the gates do not test.** The gates are exactly the commands in `loopgate.json`; a repo with weak tests has weak gates. The hook proves the gates passed for a commit, not that they were good.
@@ -322,7 +325,7 @@ The decisions behind the design are in [docs/adr](docs/adr). The ones a reader i
 | Question                                           | Answer                                                                                                                                                                    | Record                                         |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | Why does the hook not just run the gates?          | A hook has seconds and a gate run takes minutes, so the hook reads a record that the runner wrote. One extra round trip buys a hook that never times out.                 | [ADR-0001](docs/adr/0001-ci-gate-runner.md)    |
-| Why are the gates in each repo, not in `loopgate`? | So `loopgate` gates any language, and a repo's CI and its local gates stay in one reviewable file in that repo.                                                           | [ADR-0001](docs/adr/0001-ci-gate-runner.md)    |
+| Why are the gates in each repo, not in `loopgate`? | So `loopgate` gates any language, and the gate list lives in the repo it gates, next to its CI.                                                                           | [ADR-0001](docs/adr/0001-ci-gate-runner.md)    |
 | Why does a `high` finding block, and `medium` not? | A push that fails a CI gate or a review costs a round each, so a likely defect stops the push. Lesser findings are fixed or answered in the pull request.                 | [ADR-0002](docs/adr/0002-pre-push-reviewer.md) |
 | Why is the review a fixed workflow, not an agent?  | The path is fixed (gather, route, review once, report). The reviewer does not feed a fixer: a fix is the author's decision and a new commit, which needs the gates again. | [ADR-0002](docs/adr/0002-pre-push-reviewer.md) |
 | Why can the reviewer and the triager not edit?     | Their tools are `Read`, `Grep` and `Glob`, and a test fails if that changes. They advise; they cannot act on a finding or on text inside the diff.                        | [ADR-0003](docs/adr/0003-review-triage.md)     |
