@@ -100,7 +100,7 @@ The process and git helpers other tools need, compiled to `dist/` with type decl
 
 ## Gates for `loopgate` itself
 
-prettier (`printWidth` 100), `tsc --noEmit` strict, a build of the library, vitest at 100% coverage (including a test that runs the push hook against temporary repos), `npm audit --audit-level=high`, shellcheck on `*.sh`. CI also runs gitleaks, which is not one of the local gates.
+prettier (`printWidth` 100), `tsc --noEmit` strict, a build of the library, vitest at 100% coverage (including a test that runs the push hook against temporary repos), `npm audit --audit-level=high`, shellcheck on `hooks/pre-push-gate.sh` (CI checks every `*.sh`). CI also runs gitleaks, which is not one of the local gates.
 
 ## Not in this repo
 
