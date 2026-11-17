@@ -23,11 +23,11 @@ Each of those costs a CI round and a review round, and the person who merges pay
 
 ## What it does
 
-1. **`ci-gate-runner`** runs the repo's gate commands (format, lint, types, tests, audit, secret scan) in order, stops at the first failure and records a pass for the exact commit.
+1. **`ci-gate-runner`** runs the repo's gate commands (for example format, lint, types, tests, audit and a secret scan, whatever the repo lists) in order, stops at the first failure and records a pass for the exact commit.
 2. **`pre-push-review`** gathers the branch diff, picks a model by risk, and hands the diff to a read-only reviewer agent that reports defects CI cannot catch. A `high` finding blocks the push until it is fixed or overridden by the owner.
 3. **`review-triage`** reads the findings the remote review left on a pull request and sorts them into real defects, noise and decisions only the owner can make.
 4. **The push hook** refuses `git push` from Claude Code until the gates and the review are recorded for `HEAD`.
-5. **The reusable workflow** runs a read-only Claude review on every push to a pull request in the repos that adopt it.
+5. **The reusable workflow** runs a read-only Claude review on pushes to same-repository, non-draft pull requests (not Dependabot's) in the repos that adopt it.
 
 The flow: change, gates, local review, fix until green, push, remote review, the owner reviews, approves and merges. **`loopgate` never merges**.
 
