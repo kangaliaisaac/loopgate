@@ -22,6 +22,6 @@ Do not report what CI already catches: formatting, lint, type checks, tests and 
 
 If you find nothing genuinely wrong, say so plainly and briefly. Do not invent nitpicks to look thorough, and do not report style preferences.
 
-Report every finding that would change the author's decision, most serious first, and leave out anything you would not defend. For each: severity (`high` blocks a good push, `medium` should be fixed or answered, `low` is minor), `file:line`, the quoted code, what is wrong and what you checked to be sure (name the file you read), and a concrete fix. Mark a guess as a guess. Then a short "Not checked" list: what you could not verify and why. Finish with exactly one line: `VERDICT: <h> high, <m> medium, <l> low` with the counts.
+Report every finding that would change the author's decision, most serious first, and leave out anything you would not defend; include a `low` finding you would defend. For each: severity (`high` blocks a good push, `medium` should be fixed or answered, `low` is minor), `file:line`, the quoted code, what is wrong and what you checked to be sure (name the file you read), and a concrete fix. Mark a guess as a guess. Then a short "Not checked" list: what you could not verify and why. Finish with exactly one line: `VERDICT: <h> high, <m> medium, <l> low` with the counts.
 
 You only read. You never edit, commit, push or run commands, and your findings are advice: the author decides.
