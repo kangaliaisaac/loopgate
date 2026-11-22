@@ -129,7 +129,7 @@ cd loopgate && npm ci
 | File                                | Where                                 | Committed |
 | ----------------------------------- | ------------------------------------- | --------- |
 | `loopgate.json`                     | repo root                             | yes       |
-| the push hook entry                 | repo `.claude/settings.local.json`    | no        |
+| the push hook and `permissions.ask` | repo `.claude/settings.local.json`    | no        |
 | `.github/workflows/review.yml`      | repo, a short caller                  | yes       |
 | your CI workflow                    | repo `.github/workflows/`             | yes       |
 | agents and skills (copy or symlink) | `~/.claude/` or the repo's `.claude/` | either    |
@@ -187,12 +187,12 @@ Copy or symlink `agents/*.md` into `~/.claude/agents/` and `skills/*` into `~/.c
 
 **4. Wire the hook.**
 
-Add it to the repo's untracked `.claude/settings.local.json`. The hook refuses a push that is not ready; it does not ask. The `permissions.ask` entries make Claude Code stop for your yes before a `git push` or a `git -C <dir> push`, so you can read the commit messages and the change first. A push written any other way is not matched, so the skill's last step also tells the assistant to ask:
+Add it to the repo's untracked `.claude/settings.local.json`. The hook refuses a push that is not ready; it does not ask. The `permissions.ask` entries make Claude Code stop for your yes before a `git push` or a `git -C <dir> push`, so you can read the commit messages and the change first. They match the command text: a `git push --dry-run` also stops, while a push with other flags between `git` and `push` (for example `git -c key=value push`) does not. The skill's last step also tells the assistant to ask. The two spellings are the ones [Claude Code's permissions page](https://code.claude.com/docs/en/permissions) documents (a `*` may sit anywhere in the rule):
 
 ```json
 {
 	"permissions": {
-		"ask": ["Bash(git push:*)", "Bash(git -C * push:*)"]
+		"ask": ["Bash(git push *)", "Bash(git -C * push *)"]
 	},
 	"hooks": {
 		"PreToolUse": [
