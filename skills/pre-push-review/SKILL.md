@@ -15,6 +15,6 @@ Order for a change: local gates (format, lint, types, tests), then this review, 
    - `medium`: fix it, or answer it in the PR description.
    - After two rounds, ask the owner whether to continue.
 5. **Record it.** Run `node <loopgate>/bin/pre-push-review.ts log --repo <repo> --head <short sha> --model <model> --lines <lines> --high <h> --medium <m> --low <l>` with the counts from the `VERDICT` line. The record is what the hook reads. Record the real counts, including after an owner override: ask the owner, then record `--high 0` only with their yes, and say so in the PR description.
-6. **Push.** Then `git push`. The remote review runs on the PR; the owner reviews and merges.
+6. **Ask, then push.** Show the owner the commit messages and the change, and wait for their yes before `git push`: a clean review is not permission to push. The remote review runs on the PR; the owner reviews and merges.
 
 The agent only reads. Never ask it to fix anything, and never skip the local gates because the review was clean: they check different things.

@@ -187,10 +187,13 @@ Copy or symlink `agents/*.md` into `~/.claude/agents/` and `skills/*` into `~/.c
 
 **4. Wire the hook.**
 
-Add it to the repo's untracked `.claude/settings.local.json`:
+Add it to the repo's untracked `.claude/settings.local.json`. The hook refuses a push that is not ready; it does not ask. The `permissions.ask` entry makes Claude Code stop for your yes before every `git push`, so you can read the commit messages and the change first:
 
 ```json
 {
+	"permissions": {
+		"ask": ["Bash(git push:*)"]
+	},
 	"hooks": {
 		"PreToolUse": [
 			{
