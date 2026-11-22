@@ -218,6 +218,21 @@ Copy [docs/review-caller.example.yml](docs/review-caller.example.yml) into the r
 
 In GitHub, require the `review / review` check (the caller's job, then the reusable workflow's) and your gates on the branch. The hook cannot do that for you (see the next sections).
 
+## Releasing and updating
+
+Run the tools and the hook from an installed copy pinned to a release tag, and develop in a separate checkout. A branch with half-finished code then never sits under the push hook of every repo you gate.
+
+**To release a version:**
+
+1. Set `version` in `package.json` and merge the change to `main` through a pull request.
+2. Tag the merge commit and push the tag: `git tag -a vX.Y.Z -m "loopgate X.Y.Z: <what changed>"`, then `git push origin vX.Y.Z`.
+3. In a follow-up pull request, move the tag where it is pinned: `@vX.Y.Z` in [docs/review-caller.example.yml](docs/review-caller.example.yml) and in any caller workflow copied from it, and `#vX.Y.Z` in the dependency example in [docs/library.md](docs/library.md).
+
+**To update an installed copy and its consumers:**
+
+1. In the installed checkout, run `git fetch --tags`, `git checkout vX.Y.Z` and `npm ci`. The checkout stays on the detached tag.
+2. In a repo that depends on the library, change `#vX.Y.Z` in `package.json` and run `npm install`.
+
 ## A worked example
 
 A repo `acme/my-agent` with two gates, `lint` and `test`, and a feature branch with one commit. Every output below comes from running the tools in a scratch repo; only the paths are shortened.
