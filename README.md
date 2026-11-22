@@ -187,12 +187,12 @@ Copy or symlink `agents/*.md` into `~/.claude/agents/` and `skills/*` into `~/.c
 
 **4. Wire the hook.**
 
-Add it to the repo's untracked `.claude/settings.local.json`. The hook refuses a push that is not ready; it does not ask. The `permissions.ask` entries make Claude Code stop for your yes before a `git push` or a `git -C <dir> push`, so you can read the commit messages and the change first. They match the command text: a `git push --dry-run` also stops, while a push with other flags between `git` and `push` (for example `git -c key=value push`) does not. The skill's last step also tells the assistant to ask. The two spellings are the ones [Claude Code's permissions page](https://code.claude.com/docs/en/permissions) documents (a `*` may sit anywhere in the rule):
+Add it to the repo's untracked `.claude/settings.local.json`. The hook refuses a push that is not ready; it does not ask. The `permissions.ask` entries make Claude Code stop for your yes before a `git push` or a `git -C <dir> push`, so you can read the commit messages and the change first. They match the command text. A `git push --dry-run` also stops. A bare `git push` matches the first rule, because [Claude Code's permissions page](https://code.claude.com/docs/en/permissions) says a trailing ` *` also matches the command with no arguments when it is the rule's only wildcard; the second rule has two wildcards, so a bare `git -C <dir> push` gets the third entry. Anything that is not the plain text of a push is not matched: other flags between `git` and `push` (`git -c key=value push`), `env git push`, `bash -c 'git push'` and `git --git-dir=<dir> push`. For those, the skill's last step, which tells the assistant to ask, is the only guard. A `*` may sit anywhere in a rule:
 
 ```json
 {
 	"permissions": {
-		"ask": ["Bash(git push *)", "Bash(git -C * push *)"]
+		"ask": ["Bash(git push *)", "Bash(git -C * push *)", "Bash(git -C * push)"]
 	},
 	"hooks": {
 		"PreToolUse": [
